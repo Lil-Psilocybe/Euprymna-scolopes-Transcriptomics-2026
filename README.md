@@ -1,1 +1,1 @@
-# Euprymna-scolopes-White-Body-Transcriptomics-2025
+# Euprymna-scolopes-Transcriptomics-2026
