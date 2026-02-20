@@ -1,0 +1,2433 @@
+---
+title: "Briseño et al. (2026) E. scolopes Transcriptomics Pipelines"
+output: html_document
+date: "2026-2-18"
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+
+
+##################################
+Loading Libraries for Bulk RNASeq#
+##################################
+```{r pressure0, echo=FALSE}
+
+library(conflicted)
+library(stringr)
+library(dplyr)
+library(plyr)
+library(tidyr)
+library(tidyverse)
+library(tibble)
+library(ggpubr)
+library(rstatix)
+library(ggprism)
+library(patchwork)
+library(magrittr)
+library(data.table) 
+library(fuzzyjoin)
+library(janitor)
+
+
+#Analyses
+library(DESeq2)
+library(topGO)
+library (clusterProfiler)
+library(R.utils)
+library(enrichplot)
+library(GO.db)
+
+
+#Figs
+library(ggplot2)
+library(ggrepel)
+library(ggsignif)
+library(ComplexHeatmap)
+library(cowplot)
+library(circlize)
+library(RColorBrewer)
+library(EnhancedVolcano)
+```
+
+
+###########################################
+Loading in Data and Setting up DESeq Table#
+###########################################
+```{r pressure1, echo=FALSE}
+
+###########################
+###Inputting Count Tables##
+###########################
+counts.table <- "~/Supplemental/SFiles/WBL.CB.OLL.LO_CC.OVRY.TST.MNTL.SKIN.HECTO_ARM.BRAKER.gIDs.featureCounts.matrix"
+featureCounts <- read.table(counts.table,
+  header = TRUE,
+  row.names=1
+  )
+
+
+#setting up samples
+samples <- c(
+  #♂ WBLs
+  "MS4_WBL", 
+  "MT13_WBL", 
+  "MT14_WBL", 
+  "MT20_WBL", 
+  "MT8_WBL",
+  #♀ WBLs
+  "FS11_WBL", 
+  "FS13_WBL", 
+  "FS15_WBL", 
+  "FT21_WBL", 
+  "FU3_WBL", 
+  
+  #♂ CBs
+  "MT13_CB", 
+  "MT6_CB", 
+  "MT8_CB",
+  #♀ CBs
+  "FS15_CB", 
+  "FT12_CB", 
+  "FU3_CB",
+  
+  #♂ OLLs
+  "MS3_OLL", 
+  "MS4_OLL", 
+  "MT8_OLL", 
+  #♀ OLLs
+  "FS13_OLL", 
+  "FS15_OLL", 
+  "FU3_OLL", 
+  
+  #♂LO_CC
+  "MT8_LO_CC",
+  "MT14_LO_CC",
+  "MT18_LO_CC",
+  #♀ LO_CC
+  "FS13_LO_CC",
+  "FS15_LO_CC",
+  "FU3_LO_CC",
+  "FT21_LO_CC",
+  
+  #OVRYs
+  "FS13_OVRY",
+  "FS15_OVRY",
+  "FS9_OVRY",
+  "FU3_OVRY",
+  #TSTs
+  "MS3_TST",
+  "MS4_TST",
+  "MT14_TST",
+  "MT8_TST",
+  
+  #♂ MNTLs
+  "MS3_MNTL",
+  "MS4_MNTL",
+  "MT13_MNTL",
+  #♀ MNTLs
+  "FS11_MNTL",
+  "FU3_MNTL",
+  #♂ SKIN
+  "MS3_SKIN",
+  "MT13_SKIN",
+  "MT8_SKIN",
+  #♀ SKIN
+  "FS11_SKIN",
+  "FU3_SKIN",
+  #♂ HECTOARM
+  "MS3_ARM",
+  "MT13_ARM",
+  "MT8_ARM",
+  #♀ HECTO_ARM
+  "FS11_ARM",
+  "FU3_ARM"
+)
+
+#Need to reorder the counts file so DESeq2 can analyze properly! 
+#This gets rid of featureCounts command headers, amazing! 
+#https://www.jianshu.com/p/80c7bf8a2834
+colnames(featureCounts) <- c("Chr", "Start", "End", "Strand", "Length", samples)
+col_order <- samples
+featureCounts.justCOUNTS <- featureCounts[ , col_order]
+
+```
+
+#########################################
+Setting EggNOG gene names for braker IDs#
+#########################################
+```{r pressure2, echo=FALSE}
+
+#######################################
+#Setting gene names for braker IDs#####
+#######################################
+
+#By calling GO/KO while I make the preferred gene names, I can just extract them this way to get prefered nams for universe/gene IDs for ontology analyses smfh I finally got it lol
+
+#README: run commented commend FIRST, look for MM_838gd_e9.emapper.annotations.tsv, and then recomment command
+eggnog_tsv <- file.choose() #look for MM_838gd_e9.emapper.annotations.tsv 
+EggNOG.PreferedNames <- fread(eggnog_tsv,
+                              select = c("query", "Preferred_name", "KEGG_ko", "GOs")) %>%
+  as.data.frame()
+EggNOG.braker.gIDs <- file.choose() #look for EggNOG.braker.gIDs - is available on github dir
+EggNOG.braker.gIDs <- fread(EggNOG.braker.gIDs)
+EggNOG.braker_geneIDs_PreferedNames <- cbind(EggNOG.PreferedNames,
+                                             EggNOG.braker.gIDs)
+#removing first query with transcript IDs and then moving geneID query column to first postion
+EggNOG.braker_geneIDs_PreferedNames = dplyr::select(EggNOG.braker_geneIDs_PreferedNames, -1)
+EggNOG.braker_geneIDs_PreferedNames <- EggNOG.braker_geneIDs_PreferedNames %>% 
+  dplyr::select(query, everything())
+#moving geneIDs into hyphenated spot in preferred names
+data <- EggNOG.braker_geneIDs_PreferedNames %>%
+  dplyr::mutate(Preferred_name = ifelse(Preferred_name == "-", query, Preferred_name))
+EggNOG.braker_geneIDs_PreferedNames <- data
+#removing multiple geneIDs from multiple transcriptIDs
+#https://stackoverflow.com/questions/24011246/deleting-rows-that-are-duplicated-in-one-column-based-on-the-conditions-of-anoth
+EggNOG.braker_geneIDs_PreferedNames = EggNOG.braker_geneIDs_PreferedNames[!duplicated(EggNOG.braker_geneIDs_PreferedNames$query),]
+#merging columns together and separating by underscore
+#https://stackoverflow.com/questions/5559467/how-to-merge-two-columns-in-r-with-a-specific-symbol
+EggNOG.braker_geneIDs_PreferedNames$Merged = paste(EggNOG.braker_geneIDs_PreferedNames$Preferred_name, 
+                                                   EggNOG.braker_geneIDs_PreferedNames$query, sep="_")
+#Getting just gID and merged
+#https://www.listendata.com/2015/06/r-keep-drop-columns-from-data-frame.html
+EggNOG.braker_geneIDs_PreferedNames = subset(EggNOG.braker_geneIDs_PreferedNames, 
+                                             select = -c(Preferred_name) )
+#Getting Merged names and GO/KOs
+EggNOG_BrakerIDs_GO_KO <- dplyr::select(EggNOG.braker_geneIDs_PreferedNames,
+                                              c('Merged','GOs','KEGG_ko'))
+#When getting to GO/KO analyses, gotta run this thru gene to term etc. 
+
+#merging featureCounts gIDs with EggNOG prefered_names_gIDs
+featureCounts.justCOUNTS <- rownames_to_column(featureCounts.justCOUNTS, "query")
+test <- plyr::join(featureCounts.justCOUNTS, 
+              EggNOG.braker_geneIDs_PreferedNames, 
+              #all = TRUE,
+              by= "query"
+              #sort = F,
+              ) %>%
+  relocate(Merged, .after = query)
+
+
+
+#moving all gIDs without EggNOG annot to NA 
+#https://www.youtube.com/watch?time_continue=101&v=YJth5tfpU3U&embeds_referring_euri=https%3A%2F%2Fwww.google.com%2F&source_ve_path=MjM4NTE&feature=emb_title
+test$Merged[is.na(test$Merged)] <- test$query[is.na(test$Merged)]
+#Removing query column with original gIDs
+test = subset(test,
+              select = -c(query))
+test <- column_to_rownames(test, var = "Merged")
+#drop GO/KO term columns from counts matrix 
+#https://www.geeksforgeeks.org/drop-columns-by-name-from-a-given-dataframe-in-r/
+featureCounts.justCOUNTS <- subset(test, select = -c(KEGG_ko,GOs))
+
+#extracting preferred names braker IDs
+#write.table(rownames(test), file = "EggNOG_Braker.preferednames.gIDs.txt",
+            #row.names = F, col.names = F,
+            #quote = F)
+```
+
+
+##########################
+#Generating a samples table
+##########################
+```{r pressure3, echo=FALSE}
+
+Tissue.Type <- factor(c("M.WB", "M.WB", "M.WB", "M.WB", "M.WB", 
+                         "F.WB", "F.WB", "F.WB", "F.WB", "F.WB",
+                         
+                         #♀/♂ CBs
+                         "M.CB", "M.CB", "M.CB",
+                         "F.CB", "F.CB", "F.CB",
+                         
+                         #♀/♂ OLs
+                         "M.OL", "M.OL", "M.OL",
+                         "F.OL", "F.OL", "F.OL",
+                         
+                         #♀/♂ LO_CCs
+                         "M.LO_CC", "M.LO_CC", "M.LO_CC",
+                         "F.LO_CC", "F.LO_CC", "F.LO_CC", "F.LO_CC",
+                         
+                         
+                         #OVRY/TSTs
+                         "OVRY", "OVRY", "OVRY", "OVRY",
+                         "TST", "TST", "TST", "TST",
+                        
+                        
+                        
+                        #♀/♂ MNTLs,
+                        "M.MNTL", "M.MNTL", "M.MNTL", 
+                        "F.MNTL", "F.MNTL",
+                        
+                        #♀/♂ SKINs,
+                        "M.SKIN", "M.SKIN", "M.SKIN", 
+                        "F.SKIN", "F.SKIN",
+                        
+                        #♀/♂ _ARMs,
+                        "M.ARM", "M.ARM", "M.ARM", 
+                        "F.ARM", "F.ARM"
+                         
+))
+
+Batch <- factor(c(#♀/♂ WBLs
+                   "1", "2", "2", "2", "2", 
+                   "2", "1","1", "2", "2",
+                   
+                   #♀/♂ CBs
+                   "1", "2", "2", 
+                   "2", "2", "2",
+                   
+                   
+                   #♀/♂ OLLs
+                   "1", "1", "2", 
+                   "1", "1", "2",
+                   
+                   
+                   #♀/♂ LO_CCs
+                   "2", "2", "2",  
+                   "1", "1", "2", "2",
+                   
+                   
+                   #♀ OVRYs
+                   "1", "1", "2", "2",
+                   #♂ TSTs
+                   "1", "1", "2", "2",
+                   
+                   #♀/♂ MNTLs,
+                   "1", "2", "2",
+                   "2", "2",
+                   
+                   #♀/♂ SKINs,
+                   "1", "2", "2",
+                   "2", "2",
+                   
+                   #♀/♂ HECTO_ARMs,
+                   "1", "2", "2",
+                   "2", "2"
+                   
+                   
+                   
+                   ))
+
+Organ.Type <- factor(c(
+  #♀/♂ WBLs
+  "Hematopoietic", "Hematopoietic", "Hematopoietic", "Hematopoietic", "Hematopoietic",
+  "Hematopoietic", "Hematopoietic", "Hematopoietic", "Hematopoietic", "Hematopoietic",
+  
+  #♀/♂ CBs
+  "Neural", "Neural", "Neural",
+  "Neural", "Neural", "Neural",
+  
+  #♀/♂ OLLs
+  "Neural", "Neural", "Neural",
+  "Neural", "Neural", "Neural",
+  
+  #♀/♂ LO_CCs
+  "Symbiotic", "Symbiotic", "Symbiotic",
+  "Symbiotic", "Symbiotic", "Symbiotic", "Symbiotic",
+  
+  #OVRY/TSTs
+  "Gonadal", "Gonadal", "Gonadal", "Gonadal",
+  "Gonadal", "Gonadal", "Gonadal", "Gonadal",
+  
+  #MNTLs
+  "Epidermal", "Epidermal", "Epidermal",
+  "Epidermal", "Epidermal",
+  
+  #SKINs
+  "Epidermal", "Epidermal", "Epidermal",
+  "Epidermal", "Epidermal",
+  
+  #HECTO_ARM
+  "Epidermal", "Epidermal", "Epidermal",
+  "Epidermal", "Epidermal"
+  
+  
+))
+
+
+
+
+
+#Symbiotic.State <- (factor(c("SYM", "SYM", "SYM", "SYM", "SYM", 
+                             #"SYM", "SYM", "SYM", "SYM","SYM", 
+                             #"ANG_APO", "ANG_APO", "ANG_APO")))
+
+
+
+
+
+Sex <- factor(c(
+  #♀/♂ WBLs
+  "M", "M", "M", "M", "M",
+  "F", "F", "F", "F", "F",
+  
+  #♀/♂ CBs
+  "M", "M", "M",
+  "F", "F", "F",
+  
+  #♀/♂ OLLs
+  "M", "M", "M",
+  "F", "F", "F",
+  
+  #♀/♂ LO_CCs
+  "M", "M", "M",
+  "F", "F", "F", "F",
+  
+  #♀/♂ OVRYs/TSTs
+  "F", "F", "F", "F",
+  "M", "M", "M", "M",
+
+
+  #♀ APO WBs
+  #"F", "F", "F",
+  
+  #♀/♂ MNTLs
+  "M", "M", "M",
+  "F", "F",
+
+  #♀/♂ SKIN
+  "M", "M", "M",
+  "F", "F",
+  
+  #♀/♂ HECTO_ARM
+  "M", "M", "M",
+  "F", "F"
+  
+))
+
+
+Hemato <- c("Hematopoietic",
+            "Hematopoietic",
+            "Hematopoietic",
+            "Hematopoietic",
+            "Hematopoietic",
+            "Hematopoietic",
+            "Hematopoietic",
+            "Hematopoietic",
+            "Hematopoietic",
+            "Hematopoietic",
+            
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic"
+            
+            
+            )
+
+#A contextual data frame
+All.coldata <- data.frame(row.names=colnames(featureCounts.justCOUNTS), 
+                          Batch, 
+                          Sex,
+                          Tissue.Type,
+                          Organ.Type,
+                          Hemato
+                          ) 
+```
+
+######################################
+###PCA Plots & Data Transformations###
+######################################
+extract rlog-transformed and variance stabilized values into a matrix
+Use PCAs to see diffs among samples before and after Seq.Batch effects
+We used "Organ.Type" attribute to generate our PCA so we have to regenerate the DDS for M/F WB "tissue.type" comparison (See GO/KO analysis below - we analyzed WB DEGs from pairwise comparisons of WBs to other organ types)
+```{r pressure4, echo=FALSE}
+dds <- DESeqDataSetFromMatrix( 
+  countData = featureCounts.justCOUNTS, 
+  colData = All.coldata, 
+  design = ~ Batch + 
+    Sex + 
+  Organ.Type
+) 
+
+design(dds)
+colData(dds)
+
+#Prefilter
+smallestGroupSize <- 7
+#7 -> smallest group size for symbiotic organ.type
+keep <- rowSums(counts(dds) >= 10) >= smallestGroupSize
+dds <- dds[keep,]
+
+#DESeq dataset
+dds <- DESeq(dds)
+
+
+vsd <- vst(dds, 
+           blind = T
+)
+plotPCA(vsd,intgroup=c("Batch","Organ.Type"))
+
+mat.vsd <- assay(vsd)
+mm.vsd <- model.matrix(~Organ.Type, colData(vsd))
+mat.vsd <- limma::removeBatchEffect(mat.vsd, 
+                                    batch=vsd$Batch,  
+                                    design=mm.vsd)
+assay(vsd) <- mat.vsd
+plotPCA(vsd,
+        intgroup=c("Batch",
+                   "Organ.Type")
+)
+plotPCA(vsd,intgroup=c("Organ.Type"))
+
+
+pca.data <- plotPCA(vsd, 
+                    intgroup=c("Organ.Type", "Sex"), 
+                    returnData=TRUE,
+                    ntop = 500,
+                    pcsToUse = 1:2:3
+                    
+                    )
+percentVar <- round(100 * attr(pca.data, "percentVar"))
+
+
+#change color to what I want
+scale_custom <- scale_fill_manual(values = c("#E18004", 
+                                             "#0072B2",
+                                             "black", 
+                                             "yellow4", 
+                                             "#009E73"))
+  
+ggplot(pca.data, 
+       aes(PC1, PC2, 
+           fill = Organ.Type, 
+           #color = Tissue.Type, 
+           shape = Sex, 
+           group = Organ.Type
+       )) +
+    geom_point(aes(PC1,
+                 PC2,
+                 fill = Organ.Type),
+             #color = "black",
+             size = 4,
+             ) +
+  scale_shape_manual(values = c(21, 24)) +
+  #colors for organ type
+  scale_fill_manual(values = c("#E18004", 
+                               "#0072B2",
+                               "navajowhite", 
+                               "yellow4", 
+                               "#009E73")) + #your colors here
+  
+  xlab(paste0("PC1: ",percentVar[1],"% variance")) +
+  ylab(paste0("PC2: ",percentVar[2],"% variance")) +
+  guides(fill = guide_legend(override.aes = list(shape = 23))) +
+  stat_ellipse(data = pca.data,
+               aes(color = Organ.Type)
+               )
+```
+
+
+######
+3D PCA
+######
+Mixed 3D PCA function from these two sources:
+Modified plotPCA from DESeq2 package. Shows the Names of the Samples (the first col of SampleTable), and uses ggrepel pkg to plot them conveniently <- https://www.biostars.org/p/333436/
+plot3DPCA from btools <- https://github.com/twbattaglia/btools/blob/master/R/plotPCA3D.R
+```{r pressure5, echo=FALSE}
+plotPCA3D <- function (object, intgroup = "condition", ntop = 500, returnData = FALSE)
+{
+  rv <- genefilter::rowVars(assay(object))
+  select <- order(rv, decreasing = TRUE)[seq_len(min(ntop, length(rv)))]
+  pca <- prcomp(t(assay(object)[select, ])) #PCA function
+  percentVar <- pca$sdev^2/sum(pca$sdev^2) #caluclating PCA variance
+  if (!all(intgroup %in% names(colData(object)))) {
+    stop("the argument 'intgroup' should specify columns of colData(dds)")
+  }
+  intgroup.df <- as.data.frame(colData(object)[, intgroup, drop = FALSE])
+  group <- if (length(intgroup) > 1) {
+    factor(apply(intgroup.df, 1, paste, collapse = " : "))
+  }
+  else {
+    colData(object)[[intgroup]]
+  }
+  ## Select the PCAs and percentVar that you like instead of 1 and 2
+  d <- data.frame(PC1 = pca$x[, 1],
+                  PC2 = pca$x[, 2],
+                  PC3 = pca$x[, 3],
+                  group = group,
+                  intgroup.df,
+                  name = colnames(object))
+  if (returnData) {
+    attr(d, "percentVar") <- percentVar[1:3]
+    return(d)
+  }
+  message("Generating plotly plot")
+  p <- plotly::plot_ly(data = d,
+                       x = ~PC1,
+                       y = ~PC2,
+                       z = ~PC3,
+                       color = Organ.Type,
+                       #symbol = Sex,
+                       symbols = Sex,
+                       mode = "markers",
+                       type = "scatter3d")
+  return(p)
+}
+
+plotly_obj <- plotPCA3D(vsd,
+                        intgroup = c("Organ.Type",
+                                     "Sex"),
+                        ntop = 500,
+                        returnData = FALSE)
+plotly_obj
+
+
+#changing symbols & colors for Sex & organ type
+#https://stackoverflow.com/questions/72555895/how-to-manually-add-symbols-with-plotly-in-r
+symbols <- c("diamond", "circle")
+```
+
+
+####################################################################
+Generating dds datasets from counts and samples table and components
+####################################################################
+```{r pressure6, echo=FALSE}
+dds <- DESeqDataSetFromMatrix( 
+  countData = featureCounts.justCOUNTS, 
+  colData = All.coldata,
+  
+  design = ~ Batch + 
+  Tissue.Type #+
+  #Sex + #<- can't run with Tissue.Type
+  #Organ.Type +
+  #Hemato
+  ) 
+
+design(dds)
+colData(dds)
+
+#Prefilter
+smallestGroupSize <- 5
+#1 -> smallest group 1 M or F
+#2 -> smallest group size for female epidermal tissue.type samples
+#10 -> smallest group for hemato vs not hemato
+nc <- counts(dds, 
+             normalized=F)
+keep <- rowSums(nc >= 10) >= smallestGroupSize
+dds <- dds[keep,]
+
+
+#relevel dds to get proper coefficients of M.WB vs F.WB
+#need to relevel dds <- https://www.biostars.org/p/448959/#484944 AND https://www.biostars.org/p/9464732/
+#for geneList of GSEA to work
+dds$Tissue.Type = relevel(dds$Tissue.Type, ref = "F.WB")
+dds <- estimateSizeFactors(dds)
+dds <- estimateDispersions(dds)
+dds <- nbinomWaldTest(dds, maxit=500) #<- ALWAYS run after running bottom code
+resultsNames(dds)
+
+#DESeq dataset
+dds <- DESeq(dds)
+nc <- counts(dds, 
+             normalized=T)
+keep <- rowSums(nc >= 10) >= smallestGroupSize
+dds <- dds[keep,]
+dds <- DESeq(dds)
+
+#Transformed matrices 
+#this is in PCA section but needs to be rerun for "tissue.type" comparison
+vsd <- vst(dds, 
+           blind = T
+           )
+mat.vsd <- assay(vsd)
+mm.vsd <- model.matrix(~Tissue.Type, colData(vsd)) #Sex #Tissue.Type
+mat.vsd <- limma::removeBatchEffect(mat.vsd, 
+                                    batch=vsd$Batch,  
+                                    design=mm.vsd)
+assay(vsd) <- mat.vsd
+
+```
+
+
+##############
+Results Tables
+##############
+```{r pressure7, echo=FALSE}
+system.time({res <- results(dds,
+                           independentFiltering = TRUE,
+                           alpha = 0.05, #run .01 for M/F
+                           contrast=c("Tissue.Type", "M.WB", "F.WB"),
+                           lfcThreshold = 0 
+)
+})
+summary(res)
+head(res)
+
+res.df <- as.data.frame(res)
+
+#Shrinking LFC values - see Making GeneList in GSEA analysis below fof clusterProfiler
+#use lfcShrink <- https://support.bioconductor.org/p/9154747/
+#need to relevel dds <- https://www.biostars.org/p/448959/#484944 AND https://www.biostars.org/p/9464732/
+#releveled at beginning of pipeline to ensure I have F.WB as reference 
+#resultsNames(dds) <- Look for the coefficient "Tissue.Type_M.WB_vs_F.WB"
+resLFC <- lfcShrink(dds, 
+                    coef = "Tissue.Type_M.WB_vs_F.WB",
+                    res = res, #can use res here once dds is releveled originally 
+                    type="apeglm")
+summary(resLFC)
+#subsetting DEGs with p.adj < .05
+resLFC.Padj.df <- as.data.frame(resLFC) %>% #make df
+  na.omit() %>% #remove NA
+  subset(padj < .05) %>% #subset DEGs
+  dplyr::arrange(desc(log2FoldChange)) #LFC values in descending order
+
+#12/2/24 - making ordered l2fc matrix and padj df for heatmap annotation below
+#getting and sorting shrunken LFC values - read this into the LFC annotation for heatmap below
+resLFC.LFC <- resLFC.Padj.df[c("log2FoldChange")]
+colnames(resLFC.LFC)[1] ="L2FC"
+resLFC.LFC.mtx <- as.matrix(resLFC.LFC)
+
+resLFC.Padj <- resLFC.Padj.df[c("padj")]
+colnames(resLFC.LFC)[1] ="L2FC"
+
+
+
+#Shrunken LEFC results table for ALL genes
+res.sorted <- resLFC
+#And for DEGs
+res.sorted <- resLFC.Padj.df
+
+res.df <- as.data.frame(res.sorted)
+```
+
+
+##########
+###DEGs###
+##########
+```{r pressure8, echo=FALSE}
+
+#extracting DEGs
+DEGs.res <- subset(res.sorted, 
+                   padj < 0.05, 
+                   log2FoldChange > 0 | log2FoldChange < 0
+)
+DEGs.res.df <- as.data.frame(DEGs.res)
+DEGs <- rownames(subset(DEGs.res))
+DEGs.df <- as.data.frame(DEGs)
+write.table(DEGs, file = "M.F_WB_DEGs.txt",
+            row.names = F, col.names = F,
+            quote = F)
+#Up and down regulated genes
+Up.DEGs.res.df <- subset(res.sorted,
+                         padj < 0.05 & 
+                         log2FoldChange > 0) %>%
+  as.data.frame()
+Up.DEGs <- rownames(Up.DEGs.res.df)
+Down.DEGs.res.df <- subset(res.sorted,
+                           padj < 0.05 & 
+                           log2FoldChange < 0) %>%
+  as.data.frame()
+Down.DEGs <- rownames(Down.DEGs.res.df)
+#To extract logFold2changes and And p values
+res.LFC.Padj <- subset(res.df, 
+                            select=c("log2FoldChange", "padj"))
+Up.DEGs.res.LFC.Padj <- subset(Up.DEGs.res.df, 
+                               select=c("log2FoldChange", "padj"))
+Down.DEGs.res.LFC.Padj <- subset(Down.DEGs.res.df, 
+                                 select=c("log2FoldChange", "padj"))
+
+
+#Transformed matrices of DEGs
+vsd.DEGs <- vsd[DEGs,] %>% assay
+vsd.Up.dge <- vsd[Up.DEGs,] %>% assay
+vsd.Down.dge <- vsd[Down.DEGs,] %>% assay
+
+#and Top 100 WB genes
+select <- order(rowMeans(counts(dds[,1:10],normalized=TRUE)), #dds[,1:10] is for top 100 WB genes 
+                              decreasing=TRUE)[1:100]
+vsd.select <- vsd[select,] %>% assay()
+#write.table(rownames(vsd.select),
+#file = "/Users/johnbriseno/Desktop/top_100 _WB_genes",
+#quote = F,
+#row.names = F, col.names = F)
+
+#OL for VB
+OL.select <- order(rowMeans(counts(dds[,17:22],normalized=TRUE)), #dds[,1:10] is for top 100 WB genes 
+                              decreasing=TRUE)[1:100]
+vsd.OL.select <- vsd[OL.select] %>% assay()
+
+
+
+
+
+
+
+DE.GOIs <- c(Up.DEGs, 
+             Down.DEGs)
+#To JUST get WBs in Heatmaps section 
+WB.vsd.DEGs <- vsd.DEGs[,1:10]
+
+#have to reorder 
+#https://stackoverflow.com/questions/1568511/how-do-i-sort-one-vector-based-on-values-of-another
+#Named.DE.GOIs <- Named.DE.GOIs[order(match(Named.DE.GOIs, rownames(VSD.padj.DEGs.df)))]
+#DEGs <- DEGs[order(match(DEGs, rownames(VSD.padj.DEGs.df)))]
+#DE.GOIs <- DE.GOIs[order(match(DE.GOIs, rownames(VSD.padj.DEGs.df)))]
+
+```
+
+
+#################
+Genes of Interest
+#################
+```{r pressure9, echo=FALSE}
+#DE.GOIs <- c(Up.DEGs, 
+ #         Down.DEGs)
+#Named.DE.GOIs <- DE.GOIs
+#pulling out annotaed DEGs with eggnog preferred names from DEG list
+#as L2FC order M first then F most on bottom of list
+Named.DE.GOIs <- c(
+  #M.DEGs
+  "DDX6_g13345",
+  "NELFCD_g13724",
+  "PGM2_g5309",
+  "klf17_g17835",
+  "SCOC_g20340",
+  "ANKHD1_g21473",
+  "ACO1_g21898",
+  "CNPPD1_g27521",
+  "APEH_g4988",
+  "PLCG2_g26356",
+  "SMCHD1_g10769",
+  "DNM2_g12687",
+  "CAMSAP1_g24993",
+  "DIXDC1_g23590",
+  "DIP2_g27405",
+  "TM9SF1_g24718",
+  "PPM1G_g8266",
+  "PI4KA_g16605",
+  "APPBP2_g9080",
+  "RABGAP1_g26916",
+  "ptrh1_g8159",
+  "EXOC7_g17367",
+  "MX2_g3785",
+  "VCPIP1_g21337",
+  "EXOC7_g17370",
+  "ARRDC2_g1978",
+  "NPRL3_g94",
+  "NISCH_g6951",
+  "HCCS_g1855",
+  "MMACHC_cluster_17235",
+  #F.DEGs
+  "admp_g21657",
+  "HEPH_cluster_2117",
+  "MMP19_g9952",
+  "ERGIC1_g21089",
+  "GALNT7_g17185",
+  "COX11_g18045",
+  "CGRRF1_g9611",
+  "SFXN1_g9626",
+  "DDIT4L_g13642",
+  "RUNX1_g2513"
+)
+
+
+Annotated.Top.Shared.Genes <- c(
+  "MTFR1_g15814",
+  "EEF1A1_g4453",
+  "HEPHL1_g25995",
+  #"RPL7_g5409",
+  "FLNB_g13942",
+  "Tm1_g2950",
+  "MYH9_g13833",
+  "GPX3_g5540",
+  "HNRNPA2B1_g16208",
+  #"RPS6_g26770",
+  "SSC4D_g24607",
+  "GAPDH_g19830",
+  "SLC25A31_g3979",
+  "TUBA1A_g19823",
+  "COTL1_g10567",
+  "SET_g27633",
+  "cdc4_g6689",
+  "SPTAN1_g27264",
+  "OAZ1_g5541",
+  "LTF_g26112",
+  "FSCN1_g18044",
+  #"RPL7A_g7544",
+  "MARCO_g21408",
+  #"RPL6_g17257",
+  #"RPS3A_g21843",
+  "LGALS8_g1351",
+  "TAF15_g28959",
+  #"RPS2_g3920",
+  #"RPL27A_g3680",
+  #"RPS3_g17769",
+  "CALR_g24593",
+  #"RPS4X_g2539",
+  "ATP5B_g19555",
+  #"RpL3_g27879",
+  #"RpL8_g6942",
+  "ANXA13_g8840",
+  #"RPL4_g6345",
+  "HNRNPH1_g13639",
+  "RHOA_g18872",
+  "CTNNB1_g22462",
+  "ARHGDIA_g14463",
+  "VDAC2_g28362",
+  "KY_g9707",
+  #"RPS7_g21972",
+  "TUBB4A_g1248",
+  "HNRNPA2B1_g16209",
+  "Cam_g4591",
+  #"RPL14_g26423",
+  #"RPL18_g14152",
+  "DDX17_g21383",
+  #"RPL13A_g16072",
+  #"RPL10A_g2109",
+  "DDX3X_g6943",
+  "GNB2L1_g13012",
+  "FTH1_g29902",
+  "F46H5.3_g7608",
+  #"RPL23A_cluster_7971",
+  #"RPL23_g18083",
+  #"RPSA_g22362",
+  "HSP90B1_g958",
+  #"RPS5_g22472",
+  "CAPRIN1_g17200",
+  "YWHAE_g16201",
+  "Hsc70-4_g18494",
+  #"RPS16_g14919",
+  "RDX_g16461",
+  "exc-4_g13820"
+)
+
+HCR_WB_GOIs <- c(
+  "HEPHL1_g25995",
+  "PGLYRP3_g2362",
+  "SSC4D_g24607",
+  "MARCO_g21408",
+  "HHEX_g29365",
+  "cluster_2407"
+  )
+
+
+#for WB hematopoietic genes
+Hematopoietic.Stem.Cell.Homologs <- c(
+  "LYL1_cluster_26621", #lymphoblastic leukemia hemato assoc.
+  #AnimalTFDB4 genes ID'd
+  "HHEX_g29365",#Hematopoietically-expressed homeobox protein HHEX
+  #Female
+  "RUNX1_g2513"
+)
+Myeloid.Progenitor.Homologs <- c(
+  "MLLT1_g2427" #myeloid leukemia factor 1
+  #"MYD88_g18324" is in immuno heatmap below
+)
+
+Platelet.Homologs <- c(
+  "TBXAS1_g21858"
+)
+Macrophage.Homologs <- c(
+  "MARCO_g21407",
+  "MARCO_g21408"
+)
+Lymphoid.Progenitor.Homologs <- c (
+  "LRMP_g26960"#, #Lymphoid-restricted membrane protein
+  )
+T.Cell.Homologs <- c(
+  #T Cell
+  "FAM49B_g8270"#, #positive regulation of memory T cell activation
+)
+B.Cell.Homologs <- c(
+  "BCAP31_g16991" #B-cell receptor-associated protein 31
+)
+
+
+
+#for all other hematopieitic genes from eggnog:
+Hematopoietic.Stem.Cell.Homologs <- c(
+  "LYL1_cluster_26621", #lymphoblastic leukemia hemato assoc.
+  "GPATCH4_g11496", #hemato prog. diff.
+  "WDR7_g17550", #hemato prog. diff.
+  "C12orf29_g28459", #hemato prog. diff.
+  "C12orf29_g28534", #hemato prog. diff.
+  "HSPA9_g26031", #neg reg
+  "HSPA9_g26032", #neg reg
+  #X#"HPGDS_g28660", #Hematopoietic prostaglandin D synthase
+  
+  #AnimalTFDB4 genes ID'd
+  "HHEX_g29365",#Hematopoietically-expressed homeobox protein HHEX
+  #Female
+  "RUNX1_g2513",
+  #Male
+  "DNM2_g12687",
+  "klf17_g17835"
+  
+)
+
+Myeloid.Progenitor.Homologs <- c(
+  "MLF1_g6613", #myeloid leukemia factor
+  #X#"MLF2_g7517", #myeloid leukemia factor
+  #X#"MLF2_cluster_20474", #myeloid leukemia factor
+  "MLLT6_g12562", #Myeloid lymphoid or mixed-lineage leukemia (trithorax homolog, Drosophila)
+  "MLLT1_g2427" #myeloid leukemia factor 1
+  #"MYD88_g18324" is in immuno heatmap below
+)
+
+#Megakaryocyte.Homologs 
+  #no ggnog annots
+Platelet.Homologs <- c(
+  #platelet
+  "HIP1_g894", #positive regulation of platelet-derived growth factor receptor-beta signaling pathway
+  "TBXAS1_g9051", #Thromboxane A synthase 1 (platelet, cytochrome P450, family 5, subfamily A)
+  "TBXAS1_g9067", #Thromboxane A synthase 1 (platelet, cytochrome P450, family 5, subfamily A)
+  "TBXAS1_g9068", #heme binding
+  "TBXAS1_g9069", #Thromboxane A synthase 1 (platelet, cytochrome P450, family 5, subfamily A)
+  "TBXAS1_g9072", #Thromboxane A synthase 1 (platelet, cytochrome P450, family 5, subfamily A)
+  "TBXAS1_g9073", #"'"
+  #X#"TBXAS1_g9075"#, ""
+  #X#"TBXAS1_g9159"#, ""
+  "TBXAS1_g18515", #""
+  #X#"TBXAS1_g18516", ""
+  "NBEAL1_g19631", #platelet formation
+  "TBXAS1_g21858",
+  #X#"PAFAH1B2_g23544", #platelet-activating factor acetyltransferase activity
+  #X#"PLA2G7_g24844",
+  "P2RX1_g28859" #serotonin secretion by platelet
+)
+
+Leukocyte.Homologs <- c(#white blood cells that include
+  #monocytes (which are dendritic cells and macrophages) as well as 
+  #lymphocytes (B/T Cells) and 
+  #granulocytes (Neutrophils, eosinophils, basophils)
+  "leng9_g14275", #Leukocyte receptor cluster
+  #X#"leng9_g14276", Leukocyte receptor cluster
+  "CSTB_g24180" #Leukocyte cysteine proteinase inhibitor 1-like
+  )
+Monocyte.Homologs <- c( #includes dendritic cells and macrophages
+  "FIBCD1_g8790" #chitin binding
+  #X#"fibcd1_g22276" #Extracellular lectin functioning as a pattern- recognition receptor in innate immunity. Binds the sugar moieties of pathogen-associated molecular patterns (PAMPs) displayed on microbes and activates the lectin pathway of the complement system. May also activate monocytes through a G protein-coupled receptor, FFAR2, inducing the secretion of interleukin-8 IL-8. Binds preferentially to 9-O-acetylated 2-6-linked sialic acid derivatives and to various glycans containing sialic acid engaged in a 2-3 linkage (By similarity)
+)
+Dendritic.Cell.Homologs <- c(
+  "TRAK2_g12312" #anterograde dendritic transport of mitochondrion
+)
+Macrophage.Homologs <- c(
+  #MIFs
+  #"MIF_g23946",
+  #"MIF_g23947",
+  #"MIF_cluster_5476",
+  #"MIF_cluster_22786",
+  #MARCO
+  #"MARCO_g12590",
+  "MARCO_g21407",
+  "MARCO_g21408"
+)
+Granulocyte.Homologs <- c( #includes neutrophils, eosinophils and basophils
+  "JAGN1_g7969" #granulocyte colony-stimulating factor signaling pathway
+)
+#Neutrophil.Homologs <- c(
+  #X#"MMP8_g24007" #neutrophil collagenase
+#)
+#eosinophil 
+  #no eggnog annots
+#basophil
+  #no eggnog annots
+Erythrocyte.Homologs <- c( # These are Red blood cells
+  "EPB41L5_g19455", #Erythrocyte membrane protein band 4.1 like 5
+  "EPB41L4B_g19457",
+  "MAEA_g22007" #enucleate erythrocyte development
+)
+Endothelieal.Regulation.Homologs <- c(
+  #X#"FOXJ2_g9354", #regulation of blood vessel endothelial cell differentiation
+  #X#"BMPER_cluster_27735", #blood vessel endothelial cell proliferation involved in sprouting angiogenesis
+  "BMPER_g15063", #BMP-binding endothelial regulator
+  "PLG_g18935", #Plasmin dissolves the fibrin of blood clots and acts as a proteolytic factor in a variety of other processes 
+  "CRY1_g23402", #Transcriptional repressor which forms a core component of the circadian clock
+  #X# "NRARP_g26852", #blood vessel endothelial cell proliferation involved in sprouting angiogenesis
+  "NRARP_g26853"
+)
+
+Lymphoid.Progenitor.Homologs <- c (
+  "LRMP_g26960", #Lymphoid-restricted membrane protein
+  "MALT1_g28359" #lymphoid tissue lymphoma translocation
+)
+Lymphocyte.Homologs <- c(
+  "USP16_g27412" #Specifically deubiquitinates 'Lys-120' of histone H2A (H2AK119Ub), a specific tag for epigenetic transcriptional repression, thereby acting as a coactivator. Deubiquitination of histone H2A is a prerequisite for subsequent phosphorylation at 'Ser-11' of histone H3 (H3S10ph), and is required for chromosome segregation when cells enter into mitosis. In resting B- and T- lymphocytes, phosphorylation by AURKB leads to enhance its activity, thereby maintaining transcription in resting lymphocytes. Regulates Hox gene expression via histone H2A deubiquitination. Prefers nucleosomal substrates. Does not deubiquitinate histone H2B
+)
+T.Cell.Homologs <- c(
+  #T Cell
+  "FAM49B_g8270", #positive regulation of memory T cell activation
+  "FLOT2_g16265", #positive regulation of establishment of T cell polarity
+  #X#"FLOT2_g16269",
+  "RAPH1_g19951", #T cell activation via T cell receptor contact with antigen bound to MHC molecule on antigen presenting cell
+  #X#"SH3RF3_g22119", #regulation of CD8-positive, alpha-beta T cell proliferation
+  "SH3RF3_g22120",
+  "CLPTM1_g22308", #regulation of T cell differentiation in thymus
+  "CLPTM1_g22310", #regulation of T cell differentiation in thymus
+  #T-Cell
+  "CMC4_cluster_20042", #Mature-T-Cell Proliferation I type
+  "MCTS1_g1254" #Malignant T-cell-amplified sequence
+)
+B.Cell.Homologs <- c(
+  #B Cell
+  "DOCK9_g1917", #guanyl-nucleotide exchange factor activity
+  "DOCK9_g1918", #marginal zone B cell differentiation
+  "ABL1_g2886", #transitional stage B cell differentiation
+  "ABL1_g2887", #non-membrane spanning protein tyrosine kinase activity. It is involved in the biological process described with protein phosphorylatio
+  "GON4L_g3075", #B cell differentiation
+  "GPS2_g24300", #negative regulation of B cell receptor signaling pathway
+  "BCL10_g27473", #regulation of mature B cell apoptotic process
+  #X#"TEC_cluster_17647" #B cell receptor signaling pathway
+  #B-Cell
+  "IKBKE_g4406", #Inhibitor of kappa light polypeptide gene enhancer in B-cells, kinase epsilon
+  "BCL3_g13569", #B-cell lymphoma 3 protein
+  "BCL3_g29370", #B-cell CLL lymphoma 3
+  "g14007_g14007", #BCL (B-Cell lymphoma); contains BH1, BH2 regions
+  "g23294_g23294",
+  "BTG1_cluster_19808", #B-cell translocation gene 1
+  "BCAP31_g16991" #B-cell receptor-associated protein 31
+)
+NK.Cell.Homologs <- c( #Natural killer cells
+  "AP1G1_g6339", #positive regulation of natural killer cell degranulation
+  "AP1G1_g6341" #protein complex 1 gamma 1 subunit
+)
+Cytokine.Associated.Homologs <- c(
+  "CUEDC2_g23122", #neg. cytokine prod
+  "SOCS6_g24263", #suppressor of cytokine signaling
+  "HGS_g26564", #Involved in intracellular signal transduction mediated by cytokines and growth factors
+  "HGS_g29205"
+  )
+
+
+Hemato.Seqs <- c(
+  Hematopoietic.Stem.Cell.Homologs,
+  
+  Myeloid.Progenitor.Homologs,
+  Platelet.Homologs,
+  Monocyte.Homologs,
+  Dendritic.Cell.Homologs,
+  Macrophage.Homologs,
+  Granulocyte.Homologs,
+  Erythrocyte.Homologs,
+  Endothelieal.Regulation.Homologs,
+  
+  Leukocyte.Homologs,
+  
+  Lymphoid.Progenitor.Homologs,
+  Lymphocyte.Homologs,
+  T.Cell.Homologs,
+  B.Cell.Homologs,
+  NK.Cell.Homologs,
+  
+  Cytokine.Associated.Homologs
+  
+  
+)
+
+
+Hemato_annotation_row = data.frame(
+                Hemato.Gene.Class = factor(rep(c(
+                                          
+                  "Hematopoietic.Stem.Cell.Homologs",
+                  
+                  "Myeloid.Progenitor.Homologs",
+                  "Platelet.Homologs",
+                  "Monocyte.Homologs",
+                  "Dendritic.Cell.Homologs",
+                  "Macrophage.Homologs",
+                  "Granulocyte.Homologs",
+                  "Erythrocyte.Homologs",
+                  
+                  "Leukocyte.Homologs",
+                  
+                  "Lymphoid.Progenitor.Homologs",
+                  "Lymphocyte.Homologs",
+                  "T.Cell.Homologs",
+                  "B.Cell.Homologs",
+                  "NK.Cell.Homologs",
+                  
+                  "Cytokine.Associated.Homologs",
+                  
+                  "Endothelieal.Regulation.Homologs"
+                  ),
+                  c(11, #Hemato SC
+                    
+                    3, #Myeloid
+                    11, #Platelet.Homologs
+                    
+                    1, #Monocyte.Homologs
+                    1, #Dendritic.Cell.Homologs
+                    2, #Macrophage.Homologs
+                    1, #Granulocyte.Homologs
+                    3, #Erythrocyte.Homologs
+                    
+                    2, #Leukocyte.Homologs
+                    
+                    2, #Lymphoid.Progenitor.Homologs
+                    1, #Lymphocyte.Homologs
+                    8, #T.Cell.Homologs
+                    14, #B.Cell.Homologs
+                    2, #NK.Cell.Homologs
+                    
+                    4, #Cytokine.Associated.Homologs
+                    
+                    4 #Endothelieal.Regulation.Homologs
+                  
+                    ))))
+
+rownames(Hemato_annotation_row) = Hemato.Seqs
+
+#Am deciding sequence order before hand
+#refactoring to get ID
+
+Hemato.Seqs.Groups <- factor(Hemato_annotation_row$Hemato.Gene.Class,
+                             levels = c("Hematopoietic.Stem.Cell.Homologs",
+                                        
+                                        "Myeloid.Progenitor.Homologs",
+                                        "Platelet.Homologs",
+                                        "Monocyte.Homologs",
+                                        "Dendritic.Cell.Homologs",
+                                        "Macrophage.Homologs",
+                                        "Granulocyte.Homologs",
+                                        "Erythrocyte.Homologs",
+                                        
+                                        "Leukocyte.Homologs",
+                                        
+                                        "Lymphoid.Progenitor.Homologs",
+                                        "Lymphocyte.Homologs",
+                                        "T.Cell.Homologs",
+                                        "B.Cell.Homologs",
+                                        "NK.Cell.Homologs",
+                                        
+                                        "Cytokine.Associated.Homologs",
+                                        
+                                        "Endothelieal.Regulation.Homologs"
+                             ))
+
+#Adding color 
+Hemato_row_colors = list(
+  Hemato.Gene.Class = c(
+                               Hematopoietic.Stem.Cell.Homologs = "red1",
+                               
+                               Myeloid.Progenitor.Homologs = "dodgerblue",
+                               Platelet.Homologs = "lightblue3",
+                               Monocyte.Homologs = "dodgerblue",
+                               Dendritic.Cell.Homologs = "dodgerblue",
+                               Macrophage.Homologs = "royalblue",
+                               Erythrocyte.Homologs = "dodgerblue",
+                               Granulocyte.Homologs = "dodgerblue",
+                               
+                               Leukocyte.Homologs = "forestgreen",
+                               
+                               Lymphoid.Progenitor.Homologs = "khaki2",
+                               Lymphocyte.Homologs = "yellow",
+                               T.Cell.Homologs = "goldenrod1",
+                               B.Cell.Homologs = "gold2",
+                               NK.Cell.Homologs = "yellow",
+                               
+                               Cytokine.Associated.Homologs = "cyan2",
+                               
+                               Endothelieal.Regulation.Homologs = "indianred3"
+))
+
+#Role of hemocytes homologs:
+CDs <- 
+  c(
+    "CD109_g9258",
+    "CD109_g9259",
+    "CD63_g7893"
+  )
+TEPs <- 
+  c(
+    "TEP1_g11640",
+    "TEP1_g11641"
+    
+  )
+SUSHI.Repeat <- c(
+  "svep1_g8895", #Domain abundant in complement control proteins; SUSHI repeat; short complement-like repeat (SCR)
+  "SVEP1_g776"
+)
+Alpha.Macroglobulin <- c(
+  #X#"LRPAP1_g21632" #Alpha-2-macroglobulin RAP, C-terminal domain
+)
+
+PGRPs <- c(
+  "PGLYRP1_g11293", #PGRP1
+  "PGLYRP1_g11297", #PGRP2
+  "PGLYRP1_g11296", #PGRP3
+  "PGLYRP1_g11299", #PGRP4
+  "PGLYRP3_g2362", #PGRP5
+  "cluster_2407" #PGRP5
+)
+NFkB.Molecules <- 
+  c(
+    
+    #From 
+    "g2715", #EsTLR
+    "IRAK4_g10752", 
+    "Traf6_g4143", 
+    "TRAF4_g8826",
+    "g28768", #Rel/NfKB
+    "TAX1BP1_g18346", #NFKB inhibitor 
+    #"TOLLIP_g27605",
+    #"TOLLIP_g27606",
+    #"TOLLIP_cluster_12230"
+    "MYD88_g18324" #Myeloid differentiation primary response protein
+  )
+Histones <- c(
+  "HIST2H4A_g13733", #H4
+  "H3F3A_g3045" #H3.2
+  #X#"HIST1H4G_g19617" #H4
+  #"cluster_20492", #H3,
+  #"g3044", #H3.2
+  #X#"H3F3C_cluster_19654" #H3.3
+  #X#"H3F3A_g21559"#H3,
+  #"g27540" #Histone H3
+  
+  
+  
+)
+
+
+Cathepsin <- c(
+  #X#"CTSZ_cluster_21742"
+  #X#"CTSZ_g20229"
+)
+
+
+
+Galectin <- c(
+  "LGALS8_g4518" #tandem repeat - genbank: AHG53998.1
+  #X##"LGALS3BP_g20303" #Galectin-3-binding protein - EggNOG
+)
+Cephalotoxin <- c(
+  #X#"g12802" #Se Cephalotoxin - BAG24412.1
+  #find more blast hits
+)
+Chitotriosidase <- c(
+  #X#"CHIT1_g4319", #Chitinase 1 (chitotriosidase)
+  #X#"CHIT1_g4320" #endochitinase activity
+
+ 
+
+)
+
+Immuno.Seqs <- c(PGRPs,
+                 Galectin,
+                 
+                 
+                 
+                 NFkB.Molecules,
+                 #Cephalotoxin,
+                 #Chitotriosidase,
+                 Histones,
+                 #Cathepsin,
+                 CDs,
+                 TEPs,
+                 SUSHI.Repeat
+                 #Alpha.Macroglobulin
+)
+
+
+
+
+
+#ceramidase/prep
+
+
+
+Immuno_annotation_row = data.frame(
+  Hemocyte.Genes = factor(rep(c(
+                                "PGRPs",
+                                "Galectin",
+                                
+                                
+                                "NFkB.Molecules",
+
+                                #"Cephalotoxin"
+                                #"Chitotriosidase"
+                                "Histones",
+                                #"Cathepsin",
+                                
+                                "CDs",
+                                "TEPs",
+                                
+                                "SUSHI.Repeat"
+                                #"Alpha.Macroglobulin"
+
+                                ),
+                              c(6, #PGRPs,
+                                1, #Galectin
+                                
+                                
+                                7, #NFkB.Molecules
+                                
+                                #0 #Cephalotoxin
+                                #0 #Chitotriosidase
+                                2, #histones
+                                #0, #cathepsin
+                                
+                                3, #CDs
+                                2, #TEP
+                                2 #SUSHI Repeat
+                                #0 #Alpha.Macroglobulin
+                                
+                              ))))
+
+
+
+
+rownames(Immuno_annotation_row) = Immuno.Seqs
+
+#Am deciding sequence order before hand
+#refactoring to get ID
+Immuno.Seqs.Groups <- factor(Immuno_annotation_row$Hemocyte.Genes,
+levels = c("PGRPs",
+           "Galectin",
+           
+           "NFkB",
+           
+           "Histones",
+           
+           "CDs",
+           "TEPs",
+           "SUSHI.Repeat"
+))
+
+#Adding color 
+Immuno_row_colors = list(
+  Hemocyte.Genes = c(
+    
+    PGRPs = "#009E73",
+    Galectin = "#009E73",
+    
+    
+    NFkB.Molecules = "red3",
+    
+    #Cephalotoxin = "orange"
+    #Chitotriosidase = "orange"
+    Histones = "orange",
+    #Cathepsin = "orange",
+    
+    CDs = "skyblue3",
+    TEPs = "skyblue3",
+    SUSHI.Repeat = "skyblue3"
+    #Alpha.Macroglobulin = "skyblue3"
+    )
+)
+
+#hemato/immuno model
+test <- c(
+    
+    "MTFR1_g15814",
+    "SLC25A31_g3979",
+    "VDAC2_g28362",
+    
+    "HHEX_g29365",
+    "GATA3_g8344",
+    "SOX7_g15292",
+    
+    "HNRNPA2B1_g16209",
+    "HNRNPA2B1_g16208",
+    "HNRNPA2B1_g17243",
+    
+    "Tm1_g2950",
+    "FSCN1_g18044",
+    "COTL1_g10567",
+    
+    "ARHGDIA_g14463",
+    "RHOA_g18872",
+    "RABGAP1_g26916",
+    
+    "HEPHL1_g25995",
+    "FTH1_g29902",
+    "SPTAN1_g27264",
+    
+    "cluster_2407",
+    "MARCO_g21408",
+    "SSC4D_g24607"
+
+
+    
+    
+    
+    #egg genes
+    #"g9006_g9006" #Vitellogenin
+    
+    #neural genes
+    #"ADAR_g4016", #DpADAR1
+    #"ADARB1_g17240", #DpADAR2
+    
+    #sym genes
+    #"F2_g6630", #cytolysis by host of symbiont cells
+    
+    #Sex.Receptor.Homologs
+    #"ESR1_g10233", #estro.Recept activity
+    #"SIRT1_g18327", #regulation of cellular response to testosterone stimulus
+    
+    #hemato 
+    #X#"g20302_g20302", deleted in malignant brain tumors 1
+    #"MKI67_g25689",
+    #"MCM2_g6694", #Minichromosome Maintenance Complex Component 2
+
+    
+    #"SOX7_g15292",
+    #"GATA3_g8344",
+    #"GATA3_cluster_11059",
+
+    #"KLF5_g29537",
+    #"KLF3_g22233",
+
+    
+    
+    #"HSPG2_g19257",
+    #"PCNA_g13641", #prolif. cell nuc. antigen 
+    #"SVEP1_g776", -> add to immuno heatmap
+
+    #"g9734_g9734",
+    #"g3966_g3966" #thryoid hormone receptor
+    #"JARID2_g8716", #JARID - arid TF
+    #"NKX2-3_g29574",
+    #"sptf-3_g12306",
+    #"g29375_g29375" #gcoupled proteinr eceptor
+    #"MX2_g3785",
+    #"RPL22_g9953",
+    #"g24508"
+    
+    
+    #scanpy cluster genes
+    #"C9orf78_g3578",
+    #"MEP1B_g2057",
+    #"g2715",
+    
+    #"PPM1E_g8945",
+    
+    #"PLEKHG4_g26211",
+    
+    #"HEPHL1_g25995",
+    
+    #"CCKAR_cluster_5296",
+    #CCKAR_g16699
+    #"CCKAR_g16700",
+    #"CCKAR_g16978",
+    #"CCKAR_g21817",
+    #"CCKAR_g21818",
+    
+    #"KCNK9_cluster_13249"#,
+    #"KCNK9_g5380",
+    #"KCNK9_g5383",
+    
+    #"EIF5A_g20833",
+    #"EIF5A_g23997"
+    
+    #"SIX2_cluster_11512"#,
+    #"SIX2_g18540",
+    #"SIX3_g16920",
+    #"SIX4_g24535",
+    
+    #"LEPRE1_g3571"
+    
+    
+    )
+
+
+
+
+
+
+```
+
+```{r, echo = FALSE}
+sn.genes <- c(
+  "cluster_26814",
+  #"CCKAR_cluster_5296"#,
+  "EIF5A_g20833",
+  #"KCNK9_cluster_13249",
+  "EEF1A1_g4453",
+  "g15408",
+  "g15409",
+  "g24360_g24360",
+  "cluster_2407",
+  "g14761_g14761",
+  "PPM1E_g8945",
+  "PLEKHG4_g26211",
+  "MKL2_g2954",
+  "DIP2_g27405",
+  "g15939",
+  #g24179,
+  "g24172",
+  "g24176",
+  #g13743
+  #cluster_2157
+  "HEPHL1_g25995",
+  #cluster_7795,
+  #"g15306",
+  "C9orf78_g3578",
+  #g6049,
+  #cluster_27998,
+  #"g6273",
+  "g15112",
+  #g17781
+  "g13593",
+  "g13598",
+  "GALNT1_g2602",
+  "RNASET2_g28955",
+  "g15836",
+  "SOX7_g15292",
+  #"C9orf135_g19176"
+  "g2715"
+  #g11046
+)
+
+```
+
+
+
+################
+Plotting counts
+################
+```{r pressure10, echo=FALSE}
+plot.results <- resLFC %>%
+  as.data.frame() %>%
+  as_tibble()
+
+#Define genes of interest <- in GOI section
+
+##Join and tidy
+tcounts <- t(log2((counts(dds[HCR_WB_GOIs,], normalized=TRUE, replaced=FALSE)+.5))) %>% 
+  #transposes dataframe - turns rows with geneIDs into columns with sample IDs as rows
+  merge(colData(dds), ., by="row.names") %>%
+  gather(GOI, Expression, (ncol(.)-length(HCR_WB_GOIs)+1):ncol(.))
+
+tcounts %>%
+  dplyr::select(Row.names, Sex, Organ.Type, GOI, Expression) %>% 
+  head %>% 
+  knitr::kable()
+
+#Change "AsIs" attributes back to characters
+#https://stackoverflow.com/questions/69226969/error-in-absx-non-numeric-argument-to-mathematical-function-in-ggplot2
+tcounts$Row.names <- as.character(trimws(tcounts$Row.names))
+
+#Just get WBs
+tcounts[tcounts$Organ.Type=='Hematopoietic'] & tcounts$] %in% c('x','y'),]
+
+ggplot(tcounts, aes(x = Row.names, y = Expression, fill= Sex)) + 
+  geom_boxplot() + 
+  facet_wrap(~GOI, scales="free_y") + 
+  labs(x="Tissue Type", 
+       y="Expression (log normalized counts)", 
+       fill="Sex", 
+       title="Candidate WB Genes")
+```
+
+
+########
+HeatMaps
+########
+Need to setup annotations for columns/rows 
+```{r pressure12, echo=FALSE}
+#column annotation
+annotation_col = data.frame((colData(dds)[("Organ.Type")]),
+                            (colData(dds)[("Sex")]),
+                            (colData(dds)[("Tissue.Type")]),
+                            (colData(dds)[("Hemato")])
+                            
+)
+
+
+```
+##########################
+HeatMaps for DEG Analysis#
+##########################
+```{r}
+
+
+#12/2/24 - rewrote adding lfc/padj annots to just pull out ordered l2fc/padj and make it a matrix/df after i made results shrink table
+#adding lfc and padj
+#https://stackoverflow.com/questions/61050899/complexheatmap-increase-label-size-of-side-annotation
+#https://jokergoo.github.io/ComplexHeatmap-reference/book/heatmap-annotations.html#box-annotation
+#https://bioconductor.riken.jp/packages/3.8/bioc/vignettes/ComplexHeatmap/inst/doc/s4.heatmap_annotation.html
+
+######################
+#adding lfc somehow###
+######################
+resLFC.LFC.mtx
+#pulling out DEG subset
+VSD.LFC.DEGs.mtx <- subset(resLFC.LFC.mtx, 
+                                 rownames(resLFC.LFC.mtx) %in% DEGs)
+VSD.LFC.Named.DEGs.mtx <- subset(resLFC.LFC.mtx, 
+                                 rownames(resLFC.LFC.mtx) %in% Named.DE.GOIs)
+######################################
+#adding padj info to heatmap somehow#
+######################################
+resLFC.Padj
+colnames(resLFC.Padj)[1] ="P.Adj"
+#pulling out named DEG subset
+VSD.padj.DEGs.df <- subset(resLFC.Padj,
+                                 rownames(resLFC.Padj) %in% DEGs)
+VSD.padj.Named.DEGs.df <- subset(resLFC.Padj,
+                                 rownames(resLFC.Padj) %in% Named.DE.GOIs)
+
+#Need reorder gene subset in the order of the LFC values
+#https://stackoverflow.com/questions/17031039/how-to-sort-a-character-vector-according-to-a-specific-order
+DEGs <- DEGs[order(match(DEGs, rownames(VSD.LFC.DEGs.mtx)))]
+Named.DE.GOIs <- Named.DE.GOIs[order(match(Named.DE.GOIs, rownames(VSD.LFC.Named.DEGs.mtx)))]
+
+
+#heating the map for All DEGs
+Candidates.Heatmap <- ComplexHeatmap::pheatmap(assay(vsd)[DEGs,],
+                                               #vsd.DEGs
+                                               #WB.vsd.DEGs
+                                               #assay(vsd)[Named.DE.GOIs,]
+                                               #WB.vsd.DEGs[DE.GOIs,]
+                                               
+                                               cluster_rows=F, 
+                                               cluster_cols=F,
+                                               
+                                               show_rownames=T,
+                                               show_colnames = T,
+                                               
+                                               #Set up for Organ.Type
+                                               column_split = annotation_col$Organ.Type,
+                                               annotation_names_col = T,
+                                               column_title = NULL,
+                                               
+                                               top_annotation = HeatmapAnnotation(Organ.Type = anno_block(gp = gpar(fill = c("#E18004", "#0072B2", "navajowhite", "yellow4", "#009E73")),
+                                               labels = c("Epidermal (MNTL, SKIN, ARM)", 
+                                               "Gonadal (OVRY, TST)", 
+                                               "Hematopoietic (WB)", 
+                                               "Neural (CB, OL)", 
+                                               "Symbioitc (LO_CC)"),  
+                                               labels_gp = gpar(col = "white", fontsize = 11))#,
+                                               ),
+                                               
+                                               
+                                               fontsize_row = 10,
+                                               fontsize_col = 10,
+                                               
+                                               col = rev(brewer.pal(11, "Spectral")),
+                                               border = NA,
+                                               
+                                               #scale = "row",
+                                               #name = "Z-Score",
+                                               name = "VST Counts",
+                                               #annotation_colors = ann_colors,
+                                               heatmap_legend_param = list(legend_direction = "horizontal"
+                                                                           #legend_width = unit(, "cm")
+                                               ),
+                                               #Horizontal Z scoring -> https://stackoverflow.com/questions/52794692/complexheatmap-cannot-create-horizontal-legend
+                                               angle_col = "45",
+                                               
+                                               
+                                               
+                                               #add L2FC and p.adj, 
+                                               right_annotation = rowAnnotation(#P.Adj Annot
+                                                 df = VSD.padj.DEGs.df, #VSD.padj.Named.DEGs.df, #VSD.padj.DEGs.df
+                                                 col = list(P.Adj = colorRamp2(c(0, .01, .001), hcl_palette = "Viridis")
+                                                 ),
+                                                 #L2FC annot
+                                                 Log2FC = anno_barplot(VSD.LFC.DEGs.mtx, 
+                                                                       #VSD.LFC.DEGs.mtx
+                                                                       #VSD.LFC.Named.DEGs.mtx
+                                                                       bar_width = .75,
+                                                                       #width = unit(3, "cm"),
+                                                                       gp = gpar(fill = ifelse(VSD.LFC.DEGs.mtx > 0,
+                                                                                               #VSD.LFC.DEGs.mtx
+                                                                                               #VSD.LFC.Named.DEGs.mtx
+                                                                                               "deepskyblue", "deeppink2"),
+                                                                                 fontsize = 10),
+                                                                       axis_param = list(
+                                                                         gp = gpar(fontsize = 8),
+                                                                         labels_rot = 45)
+                                                 ),
+                                                 
+                                                 #styling PAdj/L2FC legends
+                                                 annotation_name_rot = c(0, 0),
+                                                 annotation_width = unit(c(1.5, .7), "cm"),
+                                                 gp = gpar(col = "black"),
+                                                 show_annotation_name = c(P.Adj = FALSE),
+                                                 annotation_legend_param = list(title_gp=gpar(fontsize=10,
+                                                                                              fontface="bold"),
+                                                                                labels_gp = gpar(fontsize = 10),
+                                                                                direction = "horizontal")
+                                               )
+)
+ComplexHeatmap::draw(Candidates.Heatmap, 
+                     heatmap_legend_side="bottom", #left
+                     annotation_legend_side = "bottom", #bottom
+                     legend_grouping = "original",
+                     padding = unit(c(2, 20, 2, 2), "mm")) ## see right heatmap in following)
+
+```
+
+
+##########################
+HeatMaps for GOI Analysis#
+##########################
+```{r}
+Candidates.Heatmap <- ComplexHeatmap::pheatmap(vsd.OL.select,
+                                               #vsd.select[Annotated.Top.Shared.Genes,]
+                                               #assay(vsd)[GOIs,]
+                                               #assay(vsd)[Immuno.Seqs,]
+                                               #vsd.select
+                                               #assay(vsd)[Hemato.Seqs,]
+                                               #assay(vsd)[sn.genes,]
+                                               #assay(vsd)[HCR_WB_GOIs,]
+                                               #assay(vsd)[Immuno.Seqs,1:10]
+                                               #[,1:10]
+                                               #vsd.OL.select
+                                               
+
+                                               cluster_rows=F, 
+                                               #cluster_row_slices = T,
+                                               cluster_cols=F,
+                                               
+                                               show_rownames=T,
+                                               show_colnames = T,
+                                               
+                                               #Set up for Organ.Type
+                                               top_annotation = HeatmapAnnotation(Organ.Type = anno_block(gp = gpar(fill = c("#E18004", 
+                                                                                                                             "#0072B2", 
+                                                                                                                             "navajowhite", 
+                                                                                                                             "yellow4", 
+                                                                                                                             "#009E73")),
+                                               labels = c("Epidermal (MNTL, SKIN, ARM)", 
+                                                          "Gonadal (OVRY, TST)", 
+                                                          "Hematopoietic (WB)", 
+                                                          "Neural (CB, OL)", 
+                                                          "Symbioitc (LO_CC)"),  
+                                               labels_gp = gpar(col = "white", fontsize = 12))),
+                                               
+                                               
+                                               #column annotation
+                                               column_split = annotation_col$Organ.Type,
+                                               annotation_names_col = F,
+                                               column_title = NULL,
+                                               
+                                               #row annotation
+                                               #annotation_row = Immuno_annotation_row, #Immuno_annotation_row #Hemato_annotation_row
+                                               #row_split = Immuno.Seqs.Groups, #Immuno.Seqs.Groups #Hemato.Seqs.Groups
+                                               #annotation_names_row = F, #removes annotation label thank god #https://support.bioconductor.org/p/131791/
+                                               #row_title_rot = 0,
+                                               #row_title = NULL,
+                                               #annotation_colors = Immuno_row_colors, #Hemato_row_colors
+
+                                               
+                                               fontsize_row = 12,
+                                               fontsize_col = 8,
+                                               col = rev(brewer.pal(11, "Spectral")),
+                                               border = F,
+                                               
+                                               #Z scaling or transformed counts
+                                               #scale = "row", #z score (observes per sample/#std deviations away from mean gene expression)
+                                               #name = "Z-Score",
+                                               name = "VST Counts",
+                                               
+                                               
+                                               
+                                               heatmap_legend_param = list(legend_direction = "horizontal"#,
+                                                                           #legend_width = unit(, "cm")
+                                               ),
+                                               
+                                               #Horizontal Z scoring -> https://stackoverflow.com/questions/52794692/complexheatmap-cannot-create-horizontal-legend
+                                               angle_col = "45"
+                                               )
+                                          
+
+ComplexHeatmap::draw(Candidates.Heatmap, 
+     heatmap_legend_side="bottom", 
+     annotation_legend_side = "bottom", 
+     legend_grouping = "original",
+     padding = unit(c(2, 20, 2, 2), "mm")) ## see right heatmap in following)
+
+```
+
+
+#############################################################
+KEGG/GO Analysis with ClusterProfiler from EggNOG annotations
+#############################################################
+Several things must be considered for these analyses. 
+While DESeq2 was used to compare M/F white bodies across all RNASeq, 
+we also used DESeq2 to find upregulated WB genes across all tissues. 
+This was done by comparing the hematopoietic white bodies to each organ type 
+(epidermal, gonadal, neural, and symbiotic) independently then pooling 
+the significant white body DEGs from these data. 
+See the PCA section above for how the DDS object was generated for this
+
+I have been unable to extract GO/KO terms EggNOG-annotated Preferred Names for gene IDs - 11/19/2024, I think I got it! Must extract GO/KOs when setting preferred gene names in beginning like so:
+```{r pressure13, echo=FALSE}
+EggNOG_Directory =  "~/GO.KEGG.Results/Background_genes/EGGNOG/"
+
+EggNOG.KEGG.GO <- fread("~/Supplemental/STables/Table S2 - MM_838gd_e9.emapper.annotations.tsv",
+                     select = c("query", "KEGG_ko", "GOs"))
+#To get rid of ".t#" easily!
+EggNOG.KEGG.GO <-
+  ggNOG.KEGG.GO %>%
+  plyr::mutate(query = str_remove(query, ".t[0-9]"))
+
+#Delete hyphens - take out genes without KEGG/GO terms
+EggNOG.GO <- EggNOG.KEGG.GO[which(EggNOG.KEGG.GO$GOs != "-"),]
+EggNOG.GO <- EggNOG.GO[,c("query", "GOs")]
+EggNOG.KEGG <- EggNOG.KEGG.GO[which(EggNOG.KEGG.GO$KEGG_ko != "-"),]
+EggNOG.KEGG <- EggNOG.KEGG[,c("query", "KEGG_ko")]
+
+#############
+##11/26/2024
+#############
+#Getting Merged names and GO/KOs
+EggNOG_BrakerIDs_GO_KO <- dplyr::select(EggNOG.braker_geneIDs_PreferedNames,
+                                              c('Merged','GOs','KEGG_ko'))
+#I have just got merged names with GO/KO terms so will try to run from here
+EggNOG_BrakerIDs_GO <- EggNOG_BrakerIDs_GO_KO[which(EggNOG_BrakerIDs_GO_KO$GOs != "-"),]
+EggNOG_BrakerIDs_GO <- EggNOG_BrakerIDs_GO[,c("Merged", "GOs")]
+EggNOG_BrakerIDs_KO <- EggNOG_BrakerIDs_GO_KO[which(EggNOG_BrakerIDs_GO_KO$KEGG_ko != "-"),]
+EggNOG_BrakerIDs_KO <- EggNOG_BrakerIDs_KO[,c("Merged", "KEGG_ko")]
+#These have ~1000 less than EggNOG.GO/EggNOG.KEGG 
+#the original CDS file contains .t# transcripts -> featurecounts works on GENE level so theres only single gene entries for count matrix
+#Should note these are NOT gene2term tables because there are multiple GO/KO entries for each gene, where the reverse should be the case for gene2term tables
+#i.e. for every GO term in increasing order, there needs to be all associated named braker gene IDs
+write.table(EggNOG_BrakerIDs_GO, file = "EggNOG_BrakerIDs_GO.txt",
+            sep="\t",
+            col.names = T, 
+            row.names = F,
+            quote = FALSE
+)
+write.table(EggNOG_BrakerIDs_KO, file = "EggNOG_BrakerIDs_KO.txt", 
+            sep="\t",
+            col.names = T, 
+            row.names = F,
+            quote = FALSE
+)
+
+
+#To make GO and KO lists (Gene to GO, GO to term)
+#R - Remove commas from values in a column and place separated values into new rows
+#https://stackoverflow.com/questions/17583926/r-remove-commas-from-values-in-a-column-and-place-separated-values-into-new-ro?rq=3
+#11/26/24 - changing EggNOG.KEGG.GO with EggNOG_BrakerIDs_GO_KO
+GOs <- data.frame(cbind(
+  unlist(lapply(strsplit(EggNOG_BrakerIDs_GO_KO$GOs,","), cbind))
+)) %>% unique() 
+names(GOs)[1] <- "GOID"
+KOs <- data.frame(cbind(
+  unlist(lapply(strsplit(EggNOG_BrakerIDs_GO_KO$KEGG_ko,","), cbind))
+)) %>% unique() 
+names(KOs)[1] <- "KOID"
+
+#To add annotations to each GO and create TERM2NAME
+#May not need KO NAMEs, just KOs per gene 
+library(GO.db)
+goterms <- Term(GOTERM)
+goontology <- Ontology(GOTERM)
+GO.Term2Name <- data.frame("GOID" = names(goterms),
+                           "TERM" = goterms, 
+                           "Ontology" = goontology )
+
+#Now to create GENE2TERM for GO/KO
+#EggNOG.GO is cleaned version of EGGNog
+#11/26/24 - changing EggNOG.KEGG.GO with EggNOG_BrakerIDs_GO_KO 
+GO.Gene2Term <- data.frame(EggNOG_BrakerIDs_GO_KO$GOs,
+                           EggNOG_BrakerIDs_GO_KO$Merged
+) 
+setnames(GO.Gene2Term, c("GOID", "GENE"))
+write.table(GO.Gene2Term, file = EggNOG_Directory, 
+            sep="\t",
+            col.names = T, 
+            row.names = F,
+            quote = FALSE
+)
+
+
+
+#ReadMapping of GO/KEGG
+GO_db <- readMappings("EggNOG_BrakerIDs_GO.txt",
+                      sep = "\t",
+                      IDsep = ",")
+
+KEGG_db <- readMappings("EggNOG_BrakerIDs_KO.txt",
+                        sep="\t", 
+                        IDsep = ",")
+
+GOpath<-data.frame()
+for(i in names(GO_db)){
+  y =GO_db[[i]]
+  ln<-length(GO_db[[i]])
+  x=data.frame(ID=rep(i,ln),y)
+  GOpath<-rbind(GOpath,x)
+}
+GO.Gene2Term <- GOpath %>%
+  row_to_names(row_number = 1) #janitor dataset editor
+#need to clean to have single line for each GOID
+GO.Gene2Term <- GO.Gene2Term %>% 
+  separate_rows(GOID, sep=",") %>% 
+  dplyr::select(GOID, GENE) #this is for the unnamed braker gene IDS
+#change "merge" column name to GENE and get them in right order
+GO.Gene2Term <- GO.Gene2Term %>% 
+  dplyr::select(GOs, Merged) %>%
+  dplyr::rename(GOID = GOs, GENE = Merged)
+
+
+#subsetting for BP, MF, CC GO terms
+GO.Term2Name.CC = subset(GO.Term2Name, Ontology == "CC")
+GO.Term2Name.MF = subset(GO.Term2Name, Ontology == "MF")
+GO.Term2Name.BP = subset(GO.Term2Name, Ontology == "BP")
+
+#delete rows with word ribosom (ribosome AND ribosomal)
+#https://stackoverflow.com/questions/22249702/delete-rows-containing-specific-strings-in-r
+GO.Term2Name.CC = GO.Term2Name.CC[!grepl("ribosom", GO.Term2Name.CC$TERM),]
+GO.Term2Name.MF = GO.Term2Name.MF[!grepl("ribosom", GO.Term2Name.MF$TERM),]
+GO.Term2Name.BP = GO.Term2Name.BP[!grepl("ribosom", GO.Term2Name.BP$TERM),]
+
+#need to do the same for GO.Gene2Term
+#https://stackoverflow.com/questions/70878527/r-how-to-subset-a-dataframe-based-on-another-dataframe
+GO.Gene2Term.CC = semi_join(GO.Gene2Term, GO.Term2Name.CC, by = c("GOID"))
+GO.Gene2Term.MF = semi_join(GO.Gene2Term, GO.Term2Name.MF, by = c("GOID"))
+GO.Gene2Term.BP = semi_join(GO.Gene2Term, GO.Term2Name.BP, by = c("GOID"))
+
+#11/30/24 - ready to run GSEA with this updated list for annotated M/F WB DEGs
+
+
+
+#################################
+#ORA with GO terms via enricher()
+#################################
+#examining top white body genes 
+#read in truly unique hematopoietic sequences 
+Truly.Hemato.Unique <- "~/Supplemental/STables/File S3 - Prefered.Named.PostVenny.UniqueHematos.2519.txt"
+test <- fread(Truly.Hemato.Unique,
+              header = F) 
+Truly.Hemato.Unique <- test$V1
+
+#establish universe of unique potential genes
+universe <- GO.Gene2Term$GENE %>%
+  unique()
+gene <- Truly.Hemato.Unique #rownames(vsd.select.df) #Hematopoietic
+#11/30/2024 - need to get prefered names of truly unique hematoes
+BP.enrich <- enricher(gene = gene,
+                   universe = universe,
+                   pvalueCutoff = .05,
+                   pAdjustMethod = "BH",
+                   minGSSize = 10,
+                   maxGSSize = 500, #(length of gene)
+                   qvalueCutoff = .02,
+                   TERM2GENE = GO.Gene2Term.BP,
+                   TERM2NAME = GO.Term2Name.BP
+)
+CC.enrich <- enricher(gene = gene,
+                   universe = universe,
+                   pvalueCutoff = .05,
+                   pAdjustMethod = "BH",
+                   minGSSize = 10,
+                   maxGSSize = 500, #(length of gene)
+                   qvalueCutoff = .02,
+                   TERM2GENE = GO.Gene2Term.CC,
+                   TERM2NAME = GO.Term2Name.CC
+)
+MF.enrich <- enricher(gene = gene,
+                   universe = universe,
+                   pvalueCutoff = .05,
+                   pAdjustMethod = "BH",
+                   minGSSize = 10,
+                   maxGSSize = 500, #(length of gene)
+                   qvalueCutoff = .02,
+                   TERM2GENE = GO.Gene2Term.MF,
+                   TERM2NAME = GO.Term2Name.MF
+)
+
+BP.dotplot <- dotplot(BP.enrich, showCategory = 20)
+CC.dotplot <- dotplot(CC.enrich, showCategory = 20)
+MF.dotplot <- dotplot(MF.enrich, showCategory = 20)
+aplot::plot_list(BP.dotplot,
+                   CC.dotplot,
+                   MF.dotplot
+                   #labels=LETTERS[1:3]
+                 )
+plot_grid(BP.dotplot,
+                   CC.dotplot,
+                   MF.dotplot,
+          ncol = 1, align = "v")
+
+
+cnetplot(BP.enrich, 
+         categorySize="pvalue", 
+         #foldChange=$log2FoldChange
+         node_label="category"
+         )
+         
+cnetplot(CC.enrich, 
+         categorySize="pvalue"#, 
+         #foldChange=$log2FoldChange
+         )
+cnetplot(MF.enrich, 
+         categorySize="pvalue"#, 
+         #foldChange=$log2FoldChange
+         )
+
+#heatplot
+heatplot(BP.enrich, showCategory = 10)
+heatplot(CC.enrich, showCategory = 10)
+heatplot(MF.enrich, showCategory = 10)
+
+
+# calculate pairwise similarities of the enriched terms using Jaccard’s similarity index
+BP.enrich.Jaccard <- pairwise_termsim(BP.enrich)
+BP.treeplot <- treeplot(BP.enrich.Jaccard)
+CC.enrich.Jaccard <- pairwise_termsim(CC.enrich) 
+CC.treeplot <- treeplot(CC.enrich.Jaccard)
+MF.enrich.Jaccard <- pairwise_termsim(MF.enrich) 
+MF.treeplot <- treeplot(MF.enrich.Jaccard)
+
+aplot::plot_list(BP.treeplot, 
+                 CC.treeplot,
+                 MF.treeplot
+                 #tag_levels='A'
+                 )
+plot_grid(BP.treeplot, 
+                 CC.treeplot,
+                 MF.treeplot,
+          ncol = 1, align = "v")
+
+
+# Enrichment map 
+BP.emapplot <- emapplot(BP.enrich.Jaccard, layout = "nicely", cex.params = list(category_label = 0))
+CC.emapplot <- emapplot(CC.enrich.Jaccard, layout = "nicely", cex.params = list(category_label = 0))
+MF.emapplot <- emapplot(MF.enrich.Jaccard, layout = "nicely", cex.params = list(category_label = 0))
+aplot::plot_list(BP.emapplot,
+                   CC.emapplot,
+                   MF.emapplot
+                   #labels=LETTERS[1:3]
+                 )
+plot_grid(BP.emapplot,
+                   CC.emapplot,
+                   MF.emapplot,
+          ncol = 1, align = "v")
+
+#cnetplot again
+BP.cnetplot <- cnetplot(BP.enrich.Jaccard, 
+         categorySize="pvalue", 
+         circular = TRUE, 
+         colorEdge = TRUE
+         )
+         
+CC.cnetplot <- cnetplot(CC.enrich.Jaccard, 
+         categorySize="pvalue",
+         circular = TRUE, colorEdge = TRUE
+)
+MF.cnetplot <- cnetplot(MF.enrich.Jaccard, 
+         categorySize="pvalue",
+         circular = TRUE, colorEdge = TRUE
+         )
+
+
+
+
+
+outpathcount = "~/GO:KO Results/"
+write.csv(BP.enrich, file=paste(outpathcount,
+                                "Top.WB.DEGs.BP.enrich.csv",
+                                sep = ""), 
+          row.names = T, col.names = T, quote=FALSE) 
+write.csv(CC.enrich, file=paste(outpathcount,
+                                "Top.WB.DEGs.CC.enrich.csv",
+                                sep = ""), 
+          row.names = T, col.names = T, quote=FALSE) 
+write.csv(MF.enrich, file=paste(outpathcount,
+                                "Top.WB.DEGs.MF.enrich.csv",
+                                sep = ""), 
+          row.names = T, col.names = T, quote=FALSE) 
+write.csv(BP.enrich.Jaccard, file=paste(outpathcount,
+                                "Top.WB.DEGs.BP.enrich.Jaccard.csv",
+                                sep = ""), 
+          row.names = T, col.names = T, quote=FALSE) 
+write.csv(CC.enrich.Jaccard, file=paste(outpathcount,
+                                "Top.WB.DEGs.CC.enrich.Jaccard.csv",
+                                sep = ""), 
+          row.names = T, col.names = T, quote=FALSE) 
+write.csv(MF.enrich.Jaccard, file=paste(outpathcount,
+                                "Top.WB.DEGs.MF.enrich.Jaccard.csv",
+                                sep = ""), 
+          row.names = T, col.names = T, quote=FALSE) 
+
+
+###############################
+#ORA with KO terms via enKEGG()
+###############################
+
+#KEGG <- #https://orlanc.github.io/cp_enrichment/R_enrichment/kegg_pathway_enrichment.html
+#Create a table with IDs and ko:Knumber from input file 1
+KEGGpath<-data.frame()
+for(i in names(KEGG_db)){
+  y =KEGG_db[[i]]
+  ln<-length(KEGG_db[[i]])
+  x=data.frame(ID=rep(i,ln),y)
+  KEGGpath<-rbind(KEGGpath,x)
+}
+KEGGpath$y<-sub("ko:","",KEGGpath$y)
+colnames(KEGGpath)<-c("ID","KEGG")
+
+KEGGpath[60:80,]
+
+data = Truly.Hemato.Unique
+
+#Put in different DEG lists here
+head(data)
+
+#Get KEGG IDs for braker IDs in results.txt df
+id<- data #rownames(data)
+id_ko<-KEGGpath[which(KEGGpath$ID%in%id),]
+head(id_ko, n = 10)
+
+#How many braker IDs with KEGG IDs in results.txt df
+length(id_ko$ID)
+
+#Delete those IDs that have non-Knumber associated
+ko<-id_ko[id_ko$KEGG!="-",]
+head(ko)
+#remove duplicate rows
+#https://www.datanovia.com/en/lessons/identify-and-remove-duplicate-data-in-r/
+ko <- ko %>% distinct(ID, KEGG, .keep_all = TRUE)
+
+
+#Perform the KEGG pathway enrichment analysis
+#Use Knumber from data frame ko. 
+#In this step, you might get an error; if it happens, go back to Install and load packages.
+
+knum<-ko$KEGG
+enKEGG <-enrichKEGG(knum, 
+                     organism = 'ko', 
+                     minGSSize = 10,
+                     maxGSSize = 500,
+                     keyType = "kegg", 
+                     pvalueCutoff = .05,
+                     pAdjustMethod = "BH", 
+                     qvalueCutoff = .02
+)
+
+write.csv(enKEGG, file=paste(outpathcount,
+                                 "Top.WB.enKEGG.csv",
+                                 sep = ""), 
+            row.names=TRUE, col.names=T, quote=FALSE) 
+enKEGG.dotplot <- dotplot(enKEGG, showCategory = 20)
+enKEGG.Jaccard <- pairwise_termsim(enKEGG)
+enKEGG.treeplot <- treeplot(enKEGG.Jaccard)
+enKEGG.emapplot <- emapplot(enKEGG.Jaccard,
+                            layout = "nicely",
+                            cex.params = list(category_label = 0))
+
+
+
+plot_grid(BP.dotplot,CC.dotplot,MF.dotplot,enKEGG.dotplot,
+          ncol=1,
+          align="v")
+
+plot_grid(BP.emapplot,CC.emapplot,MF.emapplot,enKEGG.emapplot,
+          ncol=1,
+          align="v")
+
+plot_grid(BP.treeplot,CC.treeplot,MF.treeplot,enKEGG.treeplot,
+          ncol=1,
+          align="v")
+
+
+plot_grid(BP.dotplot,
+          BP.emapplot,
+          BP.treeplot,
+          
+          CC.dotplot,
+          CC.emapplot,
+          CC.treeplot,
+          
+          MF.dotplot,
+          MF.emapplot,
+          MF.treeplot,
+          
+          enKEGG.dotplot,
+          enKEGG.emapplot,
+          enKEGG.treeplot,
+          ncol = 3, 
+          nrow = 4,
+          align = "v")
+
+
+
+#####
+#GSEA for M/F WB comparison 
+#####
+#making geneList
+#use lfcShrink <- https://support.bioconductor.org/p/9154747/
+#need to relevel dds <- https://www.biostars.org/p/448959/#484944 AND https://www.biostars.org/p/9464732/
+#releveled at beginning of pipeline to ensure I have F.WB as reference 
+#resultsNames(dds)
+#Look for the coefficient "Tissue.Type_M.WB_vs_F.WB"
+#need significant shrunken LFCs (ie those from our up/down genes)
+resLFC.Padj.df <- as.data.frame(res.LFC.Padj) %>% #make df
+  na.omit() %>% #remove NA
+  subset(padj < .05) %>% #subset DEGs
+  dplyr::arrange(desc(log2FoldChange)) #LFC values in descending order
+#getting just shrunken LFC values
+resLFC.LFC <- resLFC.Padj.df[c("log2FoldChange")]
+
+PreGeneList <- tibble::rownames_to_column(resLFC.LFC, "GENE") %>% as.data.frame()
+geneList = PreGeneList[,2]
+names(geneList) = as.character(PreGeneList[,1])
+geneList = sort(geneList, decreasing = TRUE)
+
+
+gsea <-GSEA(
+  geneList,
+  exponent = 1,
+  minGSSize = 5,
+  maxGSSize = 100,
+  eps = 0,
+  pvalueCutoff = 1,
+  pAdjustMethod = "none",
+  gson = NULL,
+  TERM2GENE = GO.Gene2Term,
+  TERM2NAME = GO.Term2Name,
+  verbose = TRUE,
+  seed = FALSE,
+  by = "fgsea"
+)
+
+
+write.csv(gsea, file=paste(outpathcount,
+                                "GSEA_res.csv",
+                                sep = ""), 
+          row.names = T, col.names = T, quote=FALSE) 
+
+
+
+#Dotplot
+dotplot(gsea, showCategory=20, split=".sign") + facet_grid(.~.sign)
+
+#Encrichment Map:Enrichment map organizes enriched terms into a 
+#network with edges connecting overlapping gene sets. In this way, 
+#mutually overlapping gene sets are tend to cluster together, 
+#making it easy to identify functional modules.
+#https://github.com/YuLab-SMU/enrichplot/issues/79
+gsea_emap <- enrichplot::pairwise_termsim(gsea)#, semData = d)
+emapplot(gsea_emap)
+
+
+# categorySize can be either 'pvalue' or 'geneNum'
+#this is th best one cayse we can change the parameter to LFC which is what is interesting
+#we don't need to do a BH p adj. cause these genes are already sig. Just want to see how FC affects representative terms
+p1 <- cnetplot(gsea, categorySize="geneNum", 
+         color.params = list(foldChange = geneList),
+         showCategory = 20,
+         layout = "nicely")
+#recoloring this too for spectral colorway
+#https://support.bioconductor.org/p/p133748/
+library(scales)
+min.value <- floor( min(p1$data$color, na.rm = TRUE) )
+max.value <- ceiling( max(p1$data$color, na.rm = TRUE) )
+p1 + scale_color_gradientn(name = "Log2FoldChange",
+    colours = c("deeppink2", "gray", "deepskyblue"),
+    values = rescale(c(min.value, 0, max.value)),
+    limits= c(min.value, max.value), 
+    breaks=c(min.value , 0, max.value) )
+
+
+
+p1 <- cnetplot(gsea, node_label="category", 
+        cex_label_category = 1.2) 
+p2 <- cnetplot(gsea, node_label="gene", 
+        cex_label_gene = 0.8) 
+p3 <- cnetplot(gsea, node_label="all") 
+p4 <- cnetplot(gsea, node_label="none", 
+        color_category='firebrick', 
+        color_gene='steelblue') 
+cowplot::plot_grid(p1, p2, p3, p4, ncol=2, labels=LETTERS[1:4])
+
+
+
+
+
+
+
+
+
+
+#Ridgeplot :Grouped by gene set, density plots are generated by 
+#using the frequency of fold change values per gene within each set. 
+#Helpful to interpret up/down-regulated pathways.
+ridgeplot(gsea) + labs(x = "enrichment distribution")
+
+
+
+#GSEA Plot: Plot of the Running Enrichment Score (green line) 
+#for a gene set as the analysis walks down the ranked gene list, 
+#including the location of the maximum enrichment score (the red line). 
+#The black lines in the Running Enrichment Score show where the members 
+#of the gene set appear in the ranked list of genes, indicating the 
+#leading edge subset.
+
+#The Ranked list metric shows the value of the ranking metric 
+#(log2 fold change) as you move down the list of ranked genes. 
+#The ranking metric measures a gene’s correlation with a phenotype.
+
+#Params:
+#Gene Set Integer. Corresponds to gene set in the gse object. 
+#The first gene set is 1, second gene set is 2, etc.
+
+# Use the `Gene Set` param for the index in the title, and as the value for geneSetId
+gseaplot(gsea, by = "all", title = gsea$Description[4], geneSetID = 5)
+
+
+
+
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
