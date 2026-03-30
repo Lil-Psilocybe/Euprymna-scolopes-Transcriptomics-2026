@@ -8,7 +8,7 @@ Included here is:
 - Juoyter notebook for processing single-nucleus RNASeq data and producing figures from a pre-integrated single-nucleus count matrix generated on Parse BioSciences data visualization suite Trailmaker (add sources).
 - Buffer recipes for nuclei extraction.
 - Directories containing snRNASeq data from the publication (SDirectories 1 and 2). Both raw and filtered data are available for Parse Mini V2 dat, but only filtered is available for 10X data. Raw data available on request (too big to upload to github).
-- MultiQC output i
+- Post-Trimmomatic MultiQC HTML output from bulk RNASeq.
 
 
 
