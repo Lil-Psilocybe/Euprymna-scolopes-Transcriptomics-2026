@@ -1,0 +1,2655 @@
+---
+title: "BulkTranscrptomicsSept2026"
+output: html_document
+date: "2026-09-27"
+---
+
+##################################
+Loading Libraries for Bulk RNASeq#
+##################################
+```{r pressure0, echo=FALSE}
+
+library(conflicted)
+library(stringr)
+library(dplyr)
+library(plyr)
+library(tidyr)
+library(tidyverse)
+library(tibble)
+library(ggpubr)
+library(rstatix)
+library(ggprism)
+library(patchwork)
+library(magrittr)
+library(data.table) 
+library(fuzzyjoin)
+library(janitor)
+
+
+#Analyses
+library(DESeq2)
+library(topGO)
+library (clusterProfiler)
+library(R.utils)
+library(enrichplot)
+library(GO.db)
+library(variancePartition)
+
+
+#Figs
+library(ggplot2)
+library(ggrepel)
+library(ggsignif)
+library(ComplexHeatmap)
+library(cowplot)
+library(circlize)
+library(RColorBrewer)
+library(EnhancedVolcano)
+```
+
+
+
+
+
+###########################################
+Loading in Data and Setting up DESeq Table#
+###########################################
+```{r}
+setwd("/Users/johnbriseno/Desktop/Manuscripts/Ch2_Bulk_Atlas/Supplemental/Bulk Supp./")
+```
+
+```{r pressure1, echo=FALSE}
+
+###########################
+###Inputting Count Tables##
+###########################
+
+counts_table <- file.choose() 
+#look for featureCounts.matrix.txt
+
+featureCounts <- read.table(counts_table,
+  header = TRUE,
+  row.names=1
+  )
+
+#testing to get names of columns so i can rename them proper sample names
+#removing rly long path string from col headers put there by feature counts
+colnames(featureCounts) <- gsub("X.home.FCAM.jbriseno.JB_Nyholm_Lab.Sept2026_Ch2_BulkDataV3_ReAnalyses.STAR_GenomeV3_BRAKER_BULK.BAM..", "", colnames(featureCounts))
+
+#making samples dict/key to quickly rename
+#https://stackoverflow.com/questions/59314285/selectively-rename-r-data-frame-column-names-using-a-key-value-pair-dictionary
+idkey <- data.frame("fc_col_order" =  c("167717_S2Aligned.sortedByCoord.out.bam",
+                                        "167719_S4Aligned.sortedByCoord.out.bam",
+                                        "167720_S5Aligned.sortedByCoord.out.bam",
+                                        "167721_S6Aligned.sortedByCoord.out.bam",
+                                        "167722_S7Aligned.sortedByCoord.out.bam",
+                                        "167728_S13Aligned.sortedByCoord.out.bam",
+                                        "167730_S15Aligned.sortedByCoord.out.bam",
+                                        "167734_S19Aligned.sortedByCoord.out.bam",
+                                        "167736_S21Aligned.sortedByCoord.out.bam",
+                                        "167737_S22Aligned.sortedByCoord.out.bam",
+                                        "167741_S26Aligned.sortedByCoord.out.bam",
+                                        "167743_S28Aligned.sortedByCoord.out.bam",
+                                        "167744_S29Aligned.sortedByCoord.out.bam",
+                                        "167745_S30Aligned.sortedByCoord.out.bam",
+                                        "167747_S32Aligned.sortedByCoord.out.bam",
+                                        "167749_S34Aligned.sortedByCoord.out.bam",
+                                        "167751_S36Aligned.sortedByCoord.out.bam",
+                                        "190853_S1Aligned.sortedByCoord.out.bam",
+                                        "190854_S2Aligned.sortedByCoord.out.bam",
+                                        "190904_S3Aligned.sortedByCoord.out.bam",
+                                        "190905_S4Aligned.sortedByCoord.out.bam",
+                                        "190906_S5Aligned.sortedByCoord.out.bam",
+                                        "190907_S6Aligned.sortedByCoord.out.bam",
+                                        "190908_S7Aligned.sortedByCoord.out.bam",
+                                        "190909_S8Aligned.sortedByCoord.out.bam",
+                                        "190910_S9Aligned.sortedByCoord.out.bam",
+                                        "190911_S10Aligned.sortedByCoord.out.bam",
+                                        "190912_S11Aligned.sortedByCoord.out.bam",
+                                        "190913_S12Aligned.sortedByCoord.out.bam",
+                                        "190914_S13Aligned.sortedByCoord.out.bam",
+                                        "190915_S14Aligned.sortedByCoord.out.bam",
+                                        "190916_S15Aligned.sortedByCoord.out.bam",
+                                        "190917_S16Aligned.sortedByCoord.out.bam",
+                                        "190918_S17Aligned.sortedByCoord.out.bam",
+                                        "190920_S19Aligned.sortedByCoord.out.bam",
+                                        "190921_S20Aligned.sortedByCoord.out.bam",
+                                        "190922_S21Aligned.sortedByCoord.out.bam",
+                                        "190923_S22Aligned.sortedByCoord.out.bam",
+                                        "190924_S23Aligned.sortedByCoord.out.bam",
+                                        "190925_S24Aligned.sortedByCoord.out.bam",
+                                        "190931_S28Aligned.sortedByCoord.out.bam",
+                                        "190932_S29Aligned.sortedByCoord.out.bam",
+                                        "190933_S30Aligned.sortedByCoord.out.bam",
+                                        "190934_S31Aligned.sortedByCoord.out.bam",
+                                        "190935_S32Aligned.sortedByCoord.out.bam",
+                                        "190936_S33Aligned.sortedByCoord.out.bam",
+                                        "190938_S35Aligned.sortedByCoord.out.bam",
+                                        "190939_S36Aligned.sortedByCoord.out.bam",
+                                        "190951_S48Aligned.sortedByCoord.out.bam",
+                                        "190953_S50Aligned.sortedByCoord.out.bam",
+                                        "190954_S51Aligned.sortedByCoord.out.bam",
+                                        "190965_S53Aligned.sortedByCoord.out.bam"
+                                        ), 
+                    "ideal_name" = c("MS3_MNTL_167717",
+                                     "MS3_ARM_167719",
+                                     "MS3_SKIN_167720",
+                                     "MS3_TST_167721",
+                                     "MS3_OLL_167722",
+                                     "MS4_OLL_167728",
+                                     "MS4_WBL_167730",
+                                     "MS4_TST_167734",
+                                     "FS13_OLL_167736",
+                                     "FS13_WBL_167737",
+                                     "FS13_OVRY_167741",
+                                     "FS13_LO_CC_167743",
+                                     "FS15_CB_167744",
+                                     "FS15_OLL_167745",
+                                     "FS15_WBL_167747",
+                                     "FS13_OVRY_167749",
+                                     "FS15_LO_CC_167751",
+                                     "MS4_MNTL_190853",
+                                     "MT8_ARM_190854",
+                                     "MT8_SKIN_190904",
+                                     "MT8_TST_190905",
+                                     "MT8_OLL_190906",
+                                     "MT8_WBL_190907",
+                                     "MT8_LO_CC_190908",
+                                     "MT8_CB_190909",
+                                     "MT13_MNTL_190910",
+                                     "MT13_ARM_190911",
+                                     "MT13_SKIN_190912",
+                                     "MT13_WBL_190913",
+                                     "MT13_CB_190914",
+                                     "MT14_TST_190915",
+                                     "MT14_WBL_190916",
+                                     "MT14_LO_CC_190917",
+                                     "MT20_WBL_190918",
+                                     "MT18_LO_CC_190920",
+                                     "MT6_CB_190921",
+                                     "FS11_MNTL_190922",
+                                     "FS11_ARM_190923",
+                                     "FS11_SKIN_190924",
+                                     "FS11_WBL_190925",
+                                     "FU3_MNTL_190931",
+                                     "FU3_ARM_190932",
+                                     "FU3_SKIN_190933",
+                                     "FU3_OVRY_190934",
+                                     "FU3_OLL_190935",
+                                     "FU3_WBL_190936",
+                                     "FU3_LO_CC_190938",
+                                     "FU3_CB_190939",
+                                     "FT21_WBL_190951",
+                                     "FT21_LO_CC_190953",
+                                     "FT12_CB_190954",
+                                     "FS9_OVRY_190965"))
+colnames(featureCounts) <- dplyr::recode(
+  colnames(featureCounts), 
+  !!!setNames(as.character(idkey$ideal_name), idkey$fc_col_order)
+)
+
+
+
+
+#setting up samples
+samples <- c(
+  #♂ WBLs
+  "MS4_WBL_167730", 
+  "MT13_WBL_190913", 
+  "MT14_WBL_190916", 
+  "MT20_WBL_190918", 
+  "MT8_WBL_190907",
+  #♀ WBLs
+  "FS11_WBL_190925", 
+  "FS13_WBL_167737", 
+  "FS15_WBL_167747", 
+  "FT21_WBL_190951", 
+  "FU3_WBL_190936", 
+  
+  #♂ CBs
+  "MT8_CB_190909", 
+  "MT13_CB_190914", 
+  "MT6_CB_190921",
+  #♀ CBs
+  "FS15_CB_167744", 
+  "FU3_CB_190939", 
+  "FT12_CB_190954",
+  
+  #♂ OLLs
+  "MS3_OLL_167722", 
+  "MS4_OLL_167728", 
+  "MT8_OLL_190906", 
+  #♀ OLLs
+  "FS13_OLL_167736", 
+  "FS15_OLL_167745", 
+  "FU3_OLL_190935", 
+  
+  #♂LO_CC
+  "MT8_LO_CC_190908",
+  "MT14_LO_CC_190917",
+  "MT18_LO_CC_190920",
+  #♀ LO_CC
+  "FS13_LO_CC_167743",
+  "FS15_LO_CC_167751",
+  "FU3_LO_CC_190938",
+  "FT21_LO_CC_190953",
+  
+  #OVRYs
+  "FS13_OVRY_167749",
+  "FS15_OVRY_167741",
+  "FS9_OVRY_190934",
+  "FU3_OVRY_190965",
+  #TSTs
+  "MS3_TST_167721",
+  "MS4_TST_167734",
+  "MT14_TST_190905",
+  "MT8_TST_190915",
+  
+  #♂ MNTLs
+  "MS3_MNTL_167717",
+  "MS4_MNTL_190853",
+  "MT13_MNTL_190910",
+  #♀ MNTLs
+  "FS11_MNTL_190922",
+  "FU3_MNTL_190931",
+  #♂ SKIN
+  "MS3_SKIN_167720",
+  "MT8_SKIN_190904",
+  "MT13_SKIN_190912",
+  #♀ SKIN
+  "FS11_SKIN_190924",
+  "FSU3_SKIN_190933",
+  #♂ HECTOARM
+  "MS3_ARM_167719",
+  "MT8_ARM_190854",
+  "MT13_ARM_190911",
+  #♀ HECTO_ARM
+  "FS11_ARM_190923",
+  "FU3_ARM_190932"
+)
+
+#Need to reorder the counts file so DESeq2 can analyze properly! 
+#This gets rid of featureCounts command headers, amazing! 
+#https://www.jianshu.com/p/80c7bf8a2834
+#colnames(featureCounts) <- c("Chr", "Start", "End", "Strand", "Length", samples)
+col_order <- samples
+featureCounts_justCOUNTS <- featureCounts[ , col_order]
+```
+
+
+
+
+
+#########################################################
+Adding NCBI functional annotation info to counts table###
+#########################################################
+```{r pressure2, echo=FALSE}
+
+######################################
+#Setting gene names for counts matrix#
+######################################
+
+#look for GCF_053919585.1_ASM5391958v1_feature_table.txt
+ncbi_path <- file.choose()
+
+#reading in file with specific columns:
+#LOC gene ID
+#descriptive name
+#NCBI geneID (used for GO annot I think?)
+ncbi_features <- as.data.frame(fread(ncbi_path, select = c("symbol", "name" #"GeneID"
+                                                           )))
+
+##remove duplicated rows 
+#for 'uncharacterized' transcript variants/isoforms these rows are duplicate
+#https://stackoverflow.com/questions/13967063/remove-duplicated-rows
+unique_ncbi_features <- unique(ncbi_features[ , 1:2 ] )
+
+#remove duplicated genes (i.e. transcript variants/isoforms)
+#just want GENES!
+clean_ncbi_features <- unique_ncbi_features[!duplicated(unique_ncbi_features$symbol), ]
+#gene count is 39,658
+
+#drop duplicate string LOC names in 'name' column
+clean_ncbi_features$name <- gsub("LOC.*", "", clean_ncbi_features$name)
+
+#merge LOC and name together in new column
+clean_ncbi_features$Description <- paste(clean_ncbi_features$symbol,
+                               clean_ncbi_features$name)
+
+#change spaces and other symbols to underscores in new Description column
+#https://stackoverflow.com/questions/53107014/replace-space-between-two-words-with-an-underscore-in-a-vector
+clean_ncbi_features$Description <- gsub(" ", "_",
+                                       clean_ncbi_features$Description)
+#will start with spaces and see if i need to delete anything else down the road 
+
+#merging new names with counts table
+#first make rownames new column named symbol in counts table
+featureCounts_symbol <- tibble::rownames_to_column(featureCounts_justCOUNTS, "symbol")
+merged_df <- merge(clean_ncbi_features, featureCounts_symbol, by = "symbol", all.x=TRUE, all.y=TRUE)
+
+#drop NA (remember these are tRNAs where gene symbol is like 'Trnar-ucg')
+#https://stackoverflow.com/questions/4862178/remove-rows-with-all-or-some-nas-missing-values-in-data-frame
+merged_df <- na.omit(merged_df)
+#gene count is 29,352
+
+#renaming RUNX1 and HHEX since they are 'uncharacterized' in NCBI annots
+#also gonna rename PGRP5 and HEPHL1
+merged_df$Description <-revalue(merged_df$Description,
+                                   c("LOC145291535_uncharacterized_"="LOC145291535_RUNX1*", #RUNX1
+                                     "LOC145267028_uncharacterized_"="LOC145267028_HHEX*", #HHEX
+                                     "LOC145291335_peptidoglycan-recognition_protein_SC2-like"="LOC145291335_EsPGRP5" #PGRP5
+                                     ))
+
+
+#save merged df cause will probably have to change gene names back to symbol for EnTAP GO analyses
+write.csv(merged_df, "NCBI_LOC_Descript_counts_matrix.csv")
+```
+
+- When needing to work with merged_df again, just read it in as csv instead of running thru above block
+```{r}
+#merged_df <- read.csv("NCBI_LOC_Descript_counts_matrix.csv")
+
+#dropping other columns
+drops <- c("symbol","name")
+final_counts <- merged_df[ , !(names(merged_df) %in% drops)]
+
+#resetting rownames with new names
+rownames(final_counts) <- final_counts$Description
+final_counts <- subset(final_counts, select = -c(Description))
+
+#find duplicated rows
+final_counts[duplicated(final_counts$Description),]
+
+#save final counts
+saveRDS(final_counts, file = "final_counts.rds")
+# Write to CSV
+write.csv(final_counts, file = "final_counts.csv", row.names = TRUE)
+```
+
+Reading in final_counts
+```{r}
+# Read back in
+final_counts <- readRDS("final_counts.rds")
+final_counts <- read.csv("final_counts.csv", row.names = 1)
+```
+
+
+#############################
+Generating a samples table###
+#############################
+```{r pressure3, echo=FALSE}
+
+Tissue.Type <- factor(c("M.WB", "M.WB", "M.WB", "M.WB", "M.WB", 
+                         "F.WB", "F.WB", "F.WB", "F.WB", "F.WB",
+                         
+                         #♀/♂ CBs
+                         "M.CB", "M.CB", "M.CB",
+                         "F.CB", "F.CB", "F.CB",
+                         
+                         #♀/♂ OLs
+                         "M.OL", "M.OL", "M.OL",
+                         "F.OL", "F.OL", "F.OL",
+                         
+                         #♀/♂ LO_CCs
+                         "M.LO_CC", "M.LO_CC", "M.LO_CC",
+                         "F.LO_CC", "F.LO_CC", "F.LO_CC", "F.LO_CC",
+                         
+                         
+                         #OVRY/TSTs
+                         "OVRY", "OVRY", "OVRY", "OVRY",
+                         "TST", "TST", "TST", "TST",
+                        
+                        
+                        
+                        #♀/♂ MNTLs,
+                        "M.MNTL", "M.MNTL", "M.MNTL", 
+                        "F.MNTL", "F.MNTL",
+                        
+                        #♀/♂ SKINs,
+                        "M.SKIN", "M.SKIN", "M.SKIN", 
+                        "F.SKIN", "F.SKIN",
+                        
+                        #♀/♂ _ARMs,
+                        "M.ARM", "M.ARM", "M.ARM", 
+                        "F.ARM", "F.ARM"
+                         
+))
+
+Batch <- factor(c(#♀/♂ WBLs
+                   "1", "2", "2", "2", "2", 
+                   "2", "1","1", "2", "2",
+                   
+                   #♀/♂ CBs
+                   "1", "2", "2", 
+                   "2", "2", "2",
+                   
+                   
+                   #♀/♂ OLLs
+                   "1", "1", "2", 
+                   "1", "1", "2",
+                   
+                   
+                   #♀/♂ LO_CCs
+                   "2", "2", "2",  
+                   "1", "1", "2", "2",
+                   
+                   
+                   #♀ OVRYs
+                   "1", "1", "2", "2",
+                   #♂ TSTs
+                   "1", "1", "2", "2",
+                   
+                   #♀/♂ MNTLs,
+                   "1", "2", "2",
+                   "2", "2",
+                   
+                   #♀/♂ SKINs,
+                   "1", "2", "2",
+                   "2", "2",
+                   
+                   #♀/♂ HECTO_ARMs,
+                   "1", "2", "2",
+                   "2", "2"
+                   
+                   
+                   
+                   ))
+
+Organ.Type <- factor(c(
+  #♀/♂ WBLs
+  "Hematopoietic", "Hematopoietic", "Hematopoietic", "Hematopoietic", "Hematopoietic",
+  "Hematopoietic", "Hematopoietic", "Hematopoietic", "Hematopoietic", "Hematopoietic",
+  
+  #♀/♂ CBs
+  "Neural", "Neural", "Neural",
+  "Neural", "Neural", "Neural",
+  
+  #♀/♂ OLLs
+  "Neural", "Neural", "Neural",
+  "Neural", "Neural", "Neural",
+  
+  #♀/♂ LO_CCs
+  "Symbiotic", "Symbiotic", "Symbiotic",
+  "Symbiotic", "Symbiotic", "Symbiotic", "Symbiotic",
+  
+  #OVRY/TSTs
+  "Gonadal", "Gonadal", "Gonadal", "Gonadal",
+  "Gonadal", "Gonadal", "Gonadal", "Gonadal",
+  
+  #MNTLs
+  "Epidermal", "Epidermal", "Epidermal",
+  "Epidermal", "Epidermal",
+  
+  #SKINs
+  "Epidermal", "Epidermal", "Epidermal",
+  "Epidermal", "Epidermal",
+  
+  #HECTO_ARM
+  "Epidermal", "Epidermal", "Epidermal",
+  "Epidermal", "Epidermal"
+  
+  
+))
+
+Sex <- factor(c(
+  #♀/♂ WBLs
+  "M", "M", "M", "M", "M",
+  "F", "F", "F", "F", "F",
+  
+  #♀/♂ CBs
+  "M", "M", "M",
+  "F", "F", "F",
+  
+  #♀/♂ OLLs
+  "M", "M", "M",
+  "F", "F", "F",
+  
+  #♀/♂ LO_CCs
+  "M", "M", "M",
+  "F", "F", "F", "F",
+  
+  #♀/♂ OVRYs/TSTs
+  "F", "F", "F", "F",
+  "M", "M", "M", "M",
+
+
+  #♀ APO WBs
+  #"F", "F", "F",
+  
+  #♀/♂ MNTLs
+  "M", "M", "M",
+  "F", "F",
+
+  #♀/♂ SKIN
+  "M", "M", "M",
+  "F", "F",
+  
+  #♀/♂ HECTO_ARM
+  "M", "M", "M",
+  "F", "F"
+  
+))
+
+
+Hemato <- c("Hematopoietic",
+            "Hematopoietic",
+            "Hematopoietic",
+            "Hematopoietic",
+            "Hematopoietic",
+            "Hematopoietic",
+            "Hematopoietic",
+            "Hematopoietic",
+            "Hematopoietic",
+            "Hematopoietic",
+            
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic",
+            "NonHematopoietic"
+            
+            
+            )
+
+#A contextual data frame
+All.coldata <- data.frame(row.names=colnames(final_counts), 
+                          Batch, 
+                          Sex,
+                          Tissue.Type,
+                          Organ.Type,
+                          Hemato
+                          ) 
+
+#save All coldata
+saveRDS(All.coldata, file = "All.coldata.rds")
+# Write to CSV
+write.csv(All.coldata, file = "All.coldata.csv", row.names = TRUE)
+```
+
+Read in All.coldata
+```{r}
+All.coldata <- readRDS("All.coldata.rds")
+All.coldata <- read.csv("All.coldata.csv", row.names = 1)
+```
+
+
+
+###################################
+PCA Plots & Data Transformations###
+###################################
+- rlog-transform or variance-stabilize count values
+- Use PCAs to see diffs among samples before and after Seq.Batch effects
+- Used "Organ.Type" attribute to generate PCA so have to generate a dds still for M/F WB "tissue.type" comparison (which we do below)
+  - See GO/KO analysis below - analyzed WB DEGs from pairwise comparisons of hemato (wbs) to other organ types
+
+9.27 - I completely forgot to order these properly for feature counts!
+solutions: rename all the samples by hand to get formatting right from previous script...DONE!
+
+```{r pressure4, echo=FALSE}
+
+#making DESeq object
+dds <- DESeqDataSetFromMatrix( 
+  countData = final_counts, 
+  colData = All.coldata, 
+  design = ~ Batch + 
+    Sex + 
+    Organ.Type 
+) 
+
+design(dds)
+colData(dds)
+
+#Prefilter
+smallestGroupSize <- 7 #7 -> smallest group size for symbiotic organ.type
+keep <- rowSums(counts(dds) >= 10) >= smallestGroupSize
+dds <- dds[keep,]
+
+#DESeq algorithm
+dds <- DESeq(dds)
+
+#transformation
+vsd <- vst(dds, 
+           blind = T)
+```
+
+```{r}
+#examine pre-batch correct via PCA
+plotPCA(vsd,intgroup=c("Batch"))
+plotPCA(vsd,intgroup=c("Organ.Type"))
+
+#sequencing batch correction
+mat.vsd <- assay(vsd)
+mm.vsd <- model.matrix(~Organ.Type, colData(vsd))
+mat.vsd <- limma::removeBatchEffect(mat.vsd, 
+                                    batch=vsd$Batch,  
+                                    design=mm.vsd)
+assay(vsd) <- mat.vsd
+
+#examine post-batch correct via PCA
+plotPCA(vsd,intgroup=c("Batch"))
+plotPCA(vsd,intgroup=c("Organ.Type"))
+```
+
+```{r}
+#Fig. 3A - PCA code
+
+
+pca.data <- plotPCA(vsd, 
+                    intgroup=c("Organ.Type", "Sex"), 
+                    returnData=TRUE,
+                    ntop = 500,
+                    pcsToUse = 1:2:3
+                    
+                    )
+
+#solving pca variance (axes)
+percentVar <- round(100 * attr(pca.data, "percentVar"))
+
+#change color to what I want
+scale_custom <- scale_fill_manual(values = c("#E18004", 
+                                             "#0072B2",
+                                             "black", 
+                                             "yellow4", 
+                                             "#009E73"))
+ggplot(pca.data, 
+       aes(PC1, PC2, 
+           fill = Organ.Type, 
+           #color = Tissue.Type, 
+           shape = Sex, 
+           group = Organ.Type
+       )) +
+    geom_point(aes(PC1,
+                 PC2,
+                 fill = Organ.Type),
+             #color = "black",
+             size = 4,
+             ) +
+  scale_shape_manual(values = c(21, 24)) +
+  
+  #colors for organ type
+  scale_fill_manual(values = c("#E18004", 
+                               "#0072B2",
+                               "navajowhite", 
+                               "yellow4", 
+                               "#009E73")) + #your colors here
+  
+  #axes/labels
+  xlab(paste0("PC1: ",percentVar[1],"% variance")) +
+  ylab(paste0("PC2: ",percentVar[2],"% variance")) +
+  guides(fill = guide_legend(override.aes = list(shape = 23))) +
+  stat_ellipse(data = pca.data,
+               aes(color = Organ.Type)
+               )
+```
+
+
+
+#########
+3D PCA###
+#########
+Mixed 3D PCA function from these two sources:
+Modified plotPCA from DESeq2 package. Shows the Names of the Samples (the first col of SampleTable), and uses ggrepel pkg to plot them conveniently <- https://www.biostars.org/p/333436/
+plot3DPCA from btools <- https://github.com/twbattaglia/btools/blob/master/R/plotPCA3D.R
+```{r pressure5, echo=FALSE}
+plotPCA3D <- function (object, intgroup = "condition", ntop = 500, returnData = FALSE)
+{
+  rv <- genefilter::rowVars(assay(object))
+  select <- order(rv, decreasing = TRUE)[seq_len(min(ntop, length(rv)))]
+  pca <- prcomp(t(assay(object)[select, ])) #PCA function
+  percentVar <- pca$sdev^2/sum(pca$sdev^2) #caluclating PCA variance
+  if (!all(intgroup %in% names(colData(object)))) {
+    stop("the argument 'intgroup' should specify columns of colData(dds)")
+  }
+  intgroup.df <- as.data.frame(colData(object)[, intgroup, drop = FALSE])
+  group <- if (length(intgroup) > 1) {
+    factor(apply(intgroup.df, 1, paste, collapse = " : "))
+  }
+  else {
+    colData(object)[[intgroup]]
+  }
+  ## Select the PCAs and percentVar that you like instead of 1 and 2
+  d <- data.frame(PC1 = pca$x[, 1],
+                  PC2 = pca$x[, 2],
+                  PC3 = pca$x[, 3],
+                  group = group,
+                  intgroup.df,
+                  name = colnames(object))
+  if (returnData) {
+    attr(d, "percentVar") <- percentVar[1:3]
+    return(d)
+  }
+  message("Generating plotly plot")
+  p <- plotly::plot_ly(data = d,
+                       x = ~PC1,
+                       y = ~PC2,
+                       z = ~PC3,
+                       color = Organ.Type,
+                       #symbol = Sex,
+                       symbols = Sex,
+                       mode = "markers",
+                       type = "scatter3d")
+  return(p)
+}
+
+plotly_obj <- plotPCA3D(vsd,
+                        intgroup = c("Organ.Type",
+                                     "Sex"),
+                        ntop = 500,
+                        returnData = FALSE)
+plotly_obj
+
+
+#changing symbols & colors for Sex & organ type
+#https://stackoverflow.com/questions/72555895/how-to-manually-add-symbols-with-plotly-in-r
+symbols <- c("diamond", "circle")
+```
+
+
+
+
+
+####################################
+Generating dds for M/F WB comparison
+####################################
+```{r pressure6, echo=FALSE}
+dds <- DESeqDataSetFromMatrix( 
+  countData = final_counts, 
+  colData = All.coldata,
+  design = ~ Batch + #explicitly incorporate sequencing batch into design matrix
+  Tissue.Type
+  ) 
+
+design(dds)
+colData(dds)
+
+#Prefilter
+smallestGroupSize <- 5
+#1 -> smallest group 1 M or F
+#2 -> smallest group size for female epidermal tissue.type samples
+#10 -> smallest group for hemato vs not hemato
+nc <- counts(dds, 
+             normalized=F)
+keep <- rowSums(nc >= 10) >= smallestGroupSize
+dds <- dds[keep,]
+
+
+#relevel dds to get proper coefficients of M.WB vs F.WB
+#need to relevel dds <- https://www.biostars.org/p/448959/#484944 AND https://www.biostars.org/p/9464732/
+#for geneList of GSEA to work
+dds$Tissue.Type = relevel(dds$Tissue.Type, ref = "F.WB")
+dds <- estimateSizeFactors(dds)
+dds <- estimateDispersions(dds)
+dds <- nbinomWaldTest(dds, maxit=500) #<- ALWAYS run after running bottom code
+resultsNames(dds)
+
+#DESeq dataset
+dds <- DESeq(dds)
+nc <- counts(dds, 
+             normalized=T)
+keep <- rowSums(nc >= 10) >= smallestGroupSize
+dds <- dds[keep,]
+dds <- DESeq(dds)
+
+#Transformed matrices 
+#this is in PCA section but needs to be rerun for "tissue.type" comparison
+vsd <- vst(dds, 
+           blind = T
+           )
+mat.vsd <- assay(vsd)
+mm.vsd <- model.matrix(~Tissue.Type, colData(vsd)) #Sex #Tissue.Type
+mat.vsd <- limma::removeBatchEffect(mat.vsd, 
+                                    batch=vsd$Batch,  
+                                    design=mm.vsd)
+assay(vsd) <- mat.vsd
+
+#examine post-batch correct via PCA
+plotPCA(vsd,intgroup=c("Batch"))
+plotPCA(vsd,intgroup=c("Organ.Type"))
+plotPCA(vsd,intgroup=c("Tissue.Type"))
+```
+
+
+
+
+
+###################
+Variance Testing###
+###################
+- 3.1.2026
+  - VB says to checkout some variance in data with variancePartitioner
+    - https://bioconductor.posit.co/packages/3.23/bioc/vignettes/variancePartition/inst/doc/variancePartition.html#input-data
+
+- in the above block, we processed and normalized the gene-level counts, removed batch effect, and re-leveled dds before running variancePartition analysis.
+```{r}
+#Detecting problems caused by col-linearity of variables
+form <- ~ Batch + Sex + Organ.Type #+ Tissue.Type
+#form <- ~ Batch + Tissue.Type
+#3.2.2026 - had an issue with colin. score = 1
+#dropped hemato
+
+# fit model
+res <- fitVarPartModel(mat.vsd[1:500, ], form, All.coldata)
+
+# evaluate the collinearity score on the first model fit
+# this reports the correlation matrix between coefficient estimates
+# for fixed effects
+# the collinearity score is the maximum absolute correlation value
+# If the collinearity score > .99 then the variance partition
+# estimates may be problematic
+# In that case, a least one variable should be omitted
+colinearityScore(res[[1]])
+
+#run vp
+vp <- fitExtractVarPartModel(mat.vsd, form, All.coldata)
+
+# sort variables (i.e. columns) by median fraction
+#       of variance explained
+vp <- sortCols(vp)
+
+
+#plotting
+
+# Bar plot of variance fractions for the first 10 genes
+plotPercentBars(vp[1:10, ])
+
+# violin plot of contribution of each variable to total variance
+plotVarPart(vp)
+
+# Compute Canonical Correlation Analysis (CCA)
+# between all pairs of variables
+# returns absolute correlation value
+C <- canCorPairs(form, All.coldata)
+# Plot correlation matrix
+# between all pairs of variables
+plotCorrMatrix(C)
+
+```
+
+
+
+
+
+##############
+Results Tables
+##############
+
+M/W WB analysis (at the tissue type level)
+```{r}
+system.time({res <- results(dds,
+                           independentFiltering = TRUE,
+                           alpha = 0.05, #run .01 for M/F
+                           contrast=c("Tissue.Type", "M.WB", "F.WB"),
+                           lfcThreshold = 0 
+)
+})
+summary(res)
+head(res)
+
+res.df <- as.data.frame(res)
+
+#Shrinking LFC values - see "Making GeneList" in GSEA analysis below for clusterProfiler
+#use lfcShrink <- https://support.bioconductor.org/p/9154747/
+#need to relevel dds <- https://www.biostars.org/p/448959/#484944 AND https://www.biostars.org/p/9464732/
+#releveled at beginning of pipeline to ensure I have F.WB as reference 
+#resultsNames(dds) <- Look for the coefficient "Tissue.Type_M.WB_vs_F.WB"
+resLFC <- lfcShrink(dds, 
+                    coef = "Tissue.Type_M.WB_vs_F.WB",
+                    res = res, #can use res here once dds is releveled originally 
+                    type="apeglm")
+summary(resLFC)
+#subsetting DEGs with p.adj < .05
+resLFC.Padj.df <- as.data.frame(resLFC) %>% #make df
+  na.omit() %>% #remove NA
+  subset(padj < .05) %>% #subset DEGs
+  dplyr::arrange(desc(log2FoldChange)) #LFC values in descending order
+
+#12/2/24 - making ordered l2fc matrix and padj df for heatmap annotation below
+#getting and sorting shrunken LFC values - read this into the LFC annotation for heatmap below
+resLFC.LFC <- resLFC.Padj.df[c("log2FoldChange")]
+colnames(resLFC.LFC)[1] ="L2FC"
+resLFC.LFC.mtx <- as.matrix(resLFC.LFC)
+
+resLFC.Padj <- resLFC.Padj.df[c("padj")]
+colnames(resLFC.LFC)[1] ="L2FC"
+
+
+
+#Shrunken LEFC results table for ALL genes
+res.sorted <- resLFC
+#And for DEGs
+res.sorted <- resLFC.Padj.df
+res.df <- as.data.frame(res.sorted)
+
+#writing to file
+write.csv(res.df, "MWB_FWB_DESeq2_Res.csv")
+```
+
+
+
+Comparing Hemato (combined WBs) to other organ systems (at organ type level)
+- remember, need to rerun dds object creation at organ type level and then relevel the factors on hemato (ie hemato should be reference - it's on epidermal cause if not specified, it's alphabetical)
+```{r}
+
+#making DESeq object
+dds <- DESeqDataSetFromMatrix( 
+  countData = final_counts, 
+  colData = All.coldata, 
+  design = ~ Batch + 
+    Sex + 
+    Organ.Type 
+) 
+
+design(dds)
+colData(dds)
+
+#Prefilter
+smallestGroupSize <- 7 #7 -> smallest group size for symbiotic organ.type
+keep <- rowSums(counts(dds) >= 10) >= smallestGroupSize
+dds <- dds[keep,]
+
+#relevel on hemato
+dds$Organ.Type = relevel(dds$Organ.Type, ref = "Hematopoietic")
+dds <- estimateSizeFactors(dds)
+dds <- estimateDispersions(dds)
+dds <- nbinomWaldTest(dds, maxit=500) #<- ALWAYS run after running bottom code
+resultsNames(dds)
+
+#DESeq algorithm
+dds <- DESeq(dds)
+nc <- counts(dds, 
+             normalized=T)
+keep <- rowSums(nc >= 10) >= smallestGroupSize
+dds <- dds[keep,]
+dds <- DESeq(dds)
+
+#transformation
+vsd <- vst(dds, 
+           blind = T)
+
+#batch correction
+mat.vsd <- assay(vsd)
+mm.vsd <- model.matrix(~Tissue.Type, colData(vsd)) #Sex #Tissue.Type
+mat.vsd <- limma::removeBatchEffect(mat.vsd, 
+                                    batch=vsd$Batch,  
+                                    design=mm.vsd)
+assay(vsd) <- mat.vsd
+
+#examine post-batch correct via PCA
+plotPCA(vsd,intgroup=c("Batch"))
+plotPCA(vsd,intgroup=c("Organ.Type"))
+```
+
+And now hemato results tables and DEG extraction 
+```{r}
+system.time({res <- results(dds,
+                           independentFiltering = TRUE,
+                           alpha = 0.01, #run .01 for M/F
+                           contrast=c("Organ.Type", "Epidermal", "Hematopoietic"),
+                           lfcThreshold = 2
+)
+})
+summary(res)
+head(res)
+
+res.df <- as.data.frame(res)
+
+#shrink LFC
+resLFC <- lfcShrink(dds,
+                    coef = "Organ.Type_Epidermal_vs_Hematopoietic",
+                    res = res, #can use res here once dds is releveled originally 
+                    type="apeglm")
+#Organ.Type_Symbiotic_vs_Hematopoietic
+#Organ.Type_Gonadal_vs_Hematopoietic
+#Organ.Type_Neural_vs_Hematopoietic
+#Organ.Type_Epidermal_vs_Hematopoietic
+summary(resLFC)
+
+
+#subsetting DEGs
+resLFC.Padj.df <- as.data.frame(resLFC) %>% #make df
+  na.omit() %>% #remove NA
+  subset(padj < .01) %>% #subset DEGs
+  dplyr::arrange(desc(log2FoldChange)) #LFC values in descending order
+
+#getting DEG gene lists for each organ type
+Epidermal_DEGs <- rownames(resLFC.Padj.df %>%
+                         subset(log2FoldChange > 0))
+Hemato_v_Epidermal <- rownames(resLFC.Padj.df %>%
+                         subset(log2FoldChange < 0))
+#Symbioitc_DEGs
+#Gonadal_DEGs
+#Neural_DEGs
+#Epidermal_DEGs
+
+#writing organ type degs and res to file
+write.table(Epidermal_DEGs, file = "Epidermal_v_Hemato_DEGs.txt", 
+            sep="\t",
+            col.names = F, 
+            row.names = F,
+            quote = FALSE,
+)
+#Symbio_v_Hemato_DEGs.txt
+#Gonadal_v_Hemato_DEGs.txt
+#Neural_v_Hemato_DEGs.txt
+
+write.csv(resLFC.Padj.df, "Epidermal_v_Hemato.csv")
+#Symbio_v_Hemato.csv
+#Gonadal_v_Hemato.csv
+#Neural_v_Hemato.csv
+
+#combining wb degs and then making nunique
+Comb_Hemato <- c(
+  Hemato_v_Symbioitc,
+  Hemato_v_Gonadal,
+  Hemato_v_Neural,
+  Hemato_v_Epidermal
+) 
+Comb_unique_hemato <- unique(Comb_Hemato)
+
+#write final unique hemato gene list
+write.table(Comb_unique_hemato, file = "Unique_hemato_degs.txt",
+            sep="\t",
+            col.names = F, 
+            row.names = F,
+            quote = FALSE)
+
+```
+
+
+
+
+
+#######
+DEGs
+#######
+``` {r}
+
+#extracting DEGs
+DEGs.res <- subset(res.sorted, 
+                   padj < 0.05, 
+                   log2FoldChange > 0 | log2FoldChange < 0
+)
+DEGs.res.df <- as.data.frame(DEGs.res)
+DEGs <- rownames(subset(DEGs.res))
+DEGs.df <- as.data.frame(DEGs)
+#write.table(DEGs, file = "M.F_WB_DEGs.txt",
+            #row.names = F, col.names = F,
+            #quote = F)
+
+#Up and down regulated genes
+Up.DEGs.res.df <- subset(res.sorted,
+                         padj < 0.05 & 
+                         log2FoldChange > 0) %>%
+  as.data.frame()
+Up.DEGs <- rownames(Up.DEGs.res.df)
+Down.DEGs.res.df <- subset(res.sorted,
+                           padj < 0.05 & 
+                           log2FoldChange < 0) %>%
+  as.data.frame()
+Down.DEGs <- rownames(Down.DEGs.res.df)
+#To extract logFold2changes and And p values
+res.LFC.Padj <- subset(res.df, 
+                            select=c("log2FoldChange", "padj"))
+Up.DEGs.res.LFC.Padj <- subset(Up.DEGs.res.df, 
+                               select=c("log2FoldChange", "padj"))
+Down.DEGs.res.LFC.Padj <- subset(Down.DEGs.res.df, 
+                                 select=c("log2FoldChange", "padj"))
+
+
+#Transformed matrices of DEGs
+vsd.DEGs <- vsd[DEGs,] %>% assay
+vsd.Up.dge <- vsd[Up.DEGs,] %>% assay
+vsd.Down.dge <- vsd[Down.DEGs,] %>% assay
+
+```
+
+
+- making non-ribo, non-uncharacterized DEG list 
+```{r}
+#filtering out ribosomal genes
+DE.GOIs <- c(Up.DEGs, Down.DEGs)
+df <- as.data.frame(DE.GOIs) #converting matrix to  
+names(df)[names(df) == 'DE.GOIs'] <- 'name' ##renaming column
+df_no_ribo = as.data.frame(df[!grepl("ribosom", df$name),]) #deleting rows with 'ribosom'
+df_no_ribo_no_unchar = as.data.frame(df_no_ribo[!grepl("unchar", df_no_ribo$`df[!grepl("ribosom", df$name), ]`),]) #deleting rows with 'unchar'
+Named.DE.GOIs <- df_no_ribo_no_unchar$`df_no_ribo[!grepl("unchar", df_no_ribo$\`df[!grepl("ribosom", df$name), ]\`), ]`#making new Named.DEGs variable from these gene names
+```
+
+
+Finding top variable WB genes (Fig. 3)
+```{r}
+#and Top 100 variable WB genes
+select <- order(rowMeans(counts(dds[,1:10],normalized=TRUE)), #dds[,1:10] is for top 100 WB genes 
+                              decreasing=TRUE)[1:100]
+vsd.select <- vsd[select,] %>% assay()
+#write.table(rownames(vsd.select),
+#file = "/Users/johnbriseno/Desktop/top_100 _WB_genes",
+#quote = F,
+#row.names = F, col.names = F)
+
+#filtering out ribosomal genes
+df <- as.data.frame(vsd.select) #converting matrix to  
+df$name <- rownames(df) #making new 'name' column w the rownames to drop
+df_no_ribo = df[!grepl("ribosom", df$name),] #deleting rows with 'ribosom'
+df_no_ribo_no_unchar = df_no_ribo[!grepl("unchar", df_no_ribo$name),] #deleting rows with 'ribosom'
+drops = 'name'
+df_no_ribo_no_unchar = df_no_ribo_no_unchar[ , !names(df_no_ribo_no_unchar) %in% drops] #dropping 'name' column
+#looks like theres 81 non ribo genes, but gonna just show top 50 genes (rows)
+top_df_no_ribo_no_char = df_no_ribo_no_unchar[1:50,]
+mtx_no_ribo_no_unchar = data.matrix(top_df_no_ribo_no_char) #reconverting to mtx for heatmap
+
+
+
+#OL for VB from 2025
+OL.select <- order(rowMeans(counts(dds[,17:22],normalized=TRUE)), #dds[,1:10] is for top 100 WB genes 
+                              decreasing=TRUE)[1:100]
+vsd.OL.select <- vsd[OL.select] %>% assay()
+
+
+
+
+#To JUST get WBs in Heatmaps section like model fig 7
+WB.vsd.DEGs <- vsd.DEGs[,1:10]
+
+#have to reorder 
+#https://stackoverflow.com/questions/1568511/how-do-i-sort-one-vector-based-on-values-of-another
+#Named.DE.GOIs <- Named.DE.GOIs[order(match(Named.DE.GOIs, rownames(VSD.padj.DEGs.df)))]
+#DEGs <- DEGs[order(match(DEGs, rownames(VSD.padj.DEGs.df)))]
+#DE.GOIs <- DE.GOIs[order(match(DE.GOIs, rownames(VSD.padj.DEGs.df)))]
+
+```
+
+
+
+
+
+####################
+Genes of Interest###
+####################
+- This ones gonna take some time 
+- Searching NCBI of gene names and seeing what sticks
+- use 'final_counts' to determine counts since assay(vsd) has this normalized (i.e. low values)
+- Sets up gene names for Hemato/Immuno Fig. 4 and WB progression model of Fig. 7
+
+
+The Role of Hemocytes (McAnultuy & Nyholm, 2017) homologs:
+```{r}
+
+CDs <- 
+  c(
+    "LOC145288272_CD109_antigen-like"
+    #"LOC145288265_CD109_antigen-like",
+    #"LOC145293977_CD109_antigen-like",
+    #"LOC145288327_CD109_antigen-like",
+    #"LOC145241389_CD109_antigen-like"
+  )
+
+SUSHI.Repeat <- c(
+  "LOC145249753_sushi,_von_Willebrand_factor_type_A,_EGF_and_pentraxin_domain-containing_protein_1-like"#,
+  #"LOC145291698_sushi,_von_Willebrand_factor_type_A,_EGF_and_pentraxin_domain-containing_protein_1-like"
+)
+
+PGRPs <- c(
+  "LOC145245935_peptidoglycan_recognition_protein_1-like", #PGRP1
+  "LOC145245936_peptidoglycan_recognition_protein_1-like", #PGRP2
+  "LOC145245938_peptidoglycan_recognition_protein_1-like", #PGRP3
+  "LOC145245940_peptidoglycan_recognition_protein_1-like", #PGRP4
+  "LOC145291335_EsPGRP5" #PGRP5
+)
+
+NFkB.Molecules <- 
+  c(
+    
+    #Tolls
+    #"LOC145291538_toll-like_receptor_2_type-2",
+    #"LOC145243454_toll-like_receptor_2",
+    #"LOC145265434_toll-like_receptor_2",
+    #"LOC145252737_toll-like_receptor_4",
+    "LOC145254925_toll-like_receptor_4",
+    #"LOC145258232_toll-like_receptor_Tollo",
+    #"LOC145291122_toll-like_receptor_Tollo",
+    #"LOC145291547_toll-like_receptor_Tollo",
+    #"LOC145285835_toll-interacting_protein-like",
+    
+    #IRAKs
+    "LOC145243982_interleukin-1_receptor-associated_kinase_4-like",
+    #"LOC145294871_interleukin-1_receptor-associated_kinase_4-like",
+    #"LOC145247953_interleukin-1_receptor-associated_kinase_1-binding_protein_1_homolog",
+    "LOC145267169_interleukin_enhancer-binding_factor_2_homolog",
+    
+    #TRAFs
+    "LOC145284867_tumor_necrosis_factor_alpha-induced_protein_8-like",
+    #"LOC145248052_lipopolysaccharide-induced_tumor_necrosis_factor-alpha_factor_homolog",
+    #"LOC145265618_lipopolysaccharide-induced_tumor_necrosis_factor-alpha_factor_homolog",
+    
+    #NfKB/Rel
+    "LOC145293216_nuclear_factor_NF-kappa-B_p105_subunit-like",
+    #"LOC145278029_nuclear_factor_NF-kappa-B_p105_subunit-like",
+    #"LOC145270024_NF-kappa-B_inhibitor-interacting_Ras-like_protein_1",
+    "LOC145260317_NF-kappa-B_inhibitor_alpha-like",
+    #"LOC145252681_inhibitor_of_nuclear_factor_kappa-B_kinase_subunit_alpha-like",
+    
+    #Myd88
+    "LOC145259775_myeloid_differentiation_primary_response_protein_MyD88-like"
+  )
+
+Histones <- c(
+  "LOC145266374_histone_H3.3A",
+  "LOC145249034_histone_H4_transcription_factor-like",
+  "LOC145249510_histone_H5-like"
+)
+
+Cathepsin <- c(
+  "LOC145279650_cathepsin_B-like",
+  "LOC145245986_cathepsin_L-like_peptidase",
+  "LOC145265457_cathepsin_Z-like"
+)
+
+Galectin <- c(
+  "LOC145279619_galectin-3-binding_protein_A-like",
+  "LOC145260397_galectin-4-like",
+  "LOC145293841_galectin-4-like"
+)
+
+Cephalotoxin <- c(
+  #"LOC145248062_SE-cephalotoxin-like"
+)
+
+Chitotriosidase <- c(
+  #"LOC145279759_chitotriosidase-1-like",
+  #"LOC145292182_chitotriosidase-1-like",
+  "LOC145293110_chitotriosidase-1-like"
+)
+
+Immuno.Seqs <- c(PGRPs,
+                 Galectin,
+                 NFkB.Molecules,
+                 #Cephalotoxin,
+                 Chitotriosidase,
+                 Histones,
+                 Cathepsin,
+                 CDs,
+                 SUSHI.Repeat
+)
+
+Immuno_annotation_row = data.frame(
+  Hemocyte.Genes = factor(rep(c("PGRPs","Galectin","NFkB.Molecules",#"Cephalotoxin"
+                                "Chitotriosidase","Histones","Cathepsin","CDs","SUSHI.Repeat"
+                                ),
+                              c(
+                                #for just WB showing in Fig. 4B
+                                5, #PGRPs
+                                3, #Galectin
+                                7, #NFkB
+                                1, #Chitotriosidase
+                                3, #histones
+                                3, #cathepsin
+                                1, #CD109
+                                1 #SUSHI
+                                
+                                #for full list in Fig. S5B
+                                #5, #PGRPs,
+                                #3, #Galectin
+                                #22, #NFkB.Molecules
+                                #0, #Cephalotoxin
+                                #3, #Chitotriosidase
+                                #3, #histones
+                                #3, #cathepsin
+                                #1, #CDs
+                                #2 #SUSHI Repeat
+                              ))))
+rownames(Immuno_annotation_row) = Immuno.Seqs
+
+#Am deciding sequence order before hand
+#refactoring to get ID
+Immuno.Seqs.Groups <- factor(Immuno_annotation_row$Hemocyte.Genes,
+levels = c("PGRPs","Galectin","NFkB.Molecules",
+           "Chitotriosidase","Histones","Cathepsin","CDs","SUSHI.Repeat"
+))
+
+#Adding color 
+Immuno_row_colors = list(
+  Hemocyte.Genes = c(
+    
+    PGRPs = "#009E73",
+    Galectin = "#009E73",
+    
+    NFkB.Molecules = "red3",
+    
+    Chitotriosidase = "orange",
+    Histones = "orange",
+    Cathepsin = "orange",
+    
+    CDs = "skyblue3",
+    SUSHI.Repeat = "skyblue3"
+    )
+)
+
+
+```
+
+
+
+Hematopoietic homologs:
+```{r}
+Hemato_Stem <- c(
+  "LOC145267028_HHEX*",
+  "LOC145291535_RUNX1*",
+  
+  "LOC145259310_ETS-related_transcription_factor_Elf-2-like",
+  
+  #"LOC145258217_GATA_zinc_finger_domain-containing_protein_1-like",
+  #"LOC145280112_GATA-type_zinc_finger_protein_1-like",
+  "LOC145296204_transcription_factor_GATA-3-like"
+)
+Integrins <- c(
+  #"LOC145263070_integrin_alpha-9-like",
+  "LOC145291142_integrin_alpha-6-like",
+  "LOC145291306_integrin_alpha-9-like",
+  "LOC145291435_integrin_alpha-9-like",
+  "LOC145292146_integrin_alpha-9-like"#,
+  #"LOC145292160_integrin_alpha-4-like",
+  #"LOC145292206_integrin_alpha-8-like"
+)
+CDs <- c(
+  "LOC145269126_CD2_antigen_cytoplasmic_tail-binding_protein_2_homolog",
+  
+  #"LOC145292897_CD9_antigen-like",
+  #"LOC145293212_CD9_antigen-like",
+  "LOC145293676_CD9_antigen-like",
+  #"LOC145293677_CD9_antigen-like",
+  #"LOC145293678_CD9_antigen-like",
+  
+  #"LOC145241564_CD63_antigen-like",
+  #"LOC145247155_CD63_antigen-like",
+  #"LOC145247156_CD63_antigen-like",
+  #"LOC145247158_CD63_antigen-like",
+  #"LOC145247159_CD63_antigen-like",
+  #"LOC145247248_CD63_antigen-like",
+  #"LOC145247956_CD63_antigen-like",
+  #"LOC145252853_CD63_antigen-like",
+  "LOC145292904_CD63_antigen-like",
+  #"LOC145280157_early_activation_antigen_CD69-like",
+  
+  #"LOC145241389_CD109_antigen-like",
+  #"LOC145288265_CD109_antigen-like",
+  "LOC145288272_CD109_antigen-like",
+  #"LOC145288327_CD109_antigen-like",
+  #"LOC145293977_CD109_antigen-like",
+  
+  "LOC145252526_CD151_antigen-like",
+  "LOC145259315_CD151_antigen-like"
+)
+
+Lymphoid <- c(
+  #"LOC145239861_mucosa-associated_lymphoid_tissue_lymphoma_translocation_protein_1-like", #MALT1
+  #"LOC145256258_lymphotoxin_beta_receptor_inhibitor-like", #LTβR
+  "LOC145284740_lymphocyte-specific_helicase-like"#, #HELLS
+  #"LOC145277010_cryptochrome-1-like", #CRY1
+  #"LOC145293881_cryptochrome-1-like"
+)
+
+B_cell <- c(
+  #"LOC145239864_B-cell_lymphoma/leukemia_10-like", #BCL10
+  #"LOC145288011_B-cell_lymphoma_3_protein-like", #BCL-3
+  "LOC145256486_B-cell_receptor-associated_protein_31-like"#, #BCAP31
+  #"LOC145268288_B-cell_receptor-associated_protein_31-like", #BCAP31
+  #"LOC145268799_pre-B-cell_leukemia_transcription_factor_1-like" #PBX1
+)
+
+T_cell <- c(
+  #"LOC145268813_T-cell_activation_inhibitor,_mitochondrial-like", #TCAIM or TOAG1
+  #"LOC145287939_malignant_T-cell-amplified_sequence_1-like", #MCTS1 or MCT-1
+  "LOC145296256_T-cell_immunomodulatory_protein-like" #TIP or ITFG1
+)
+
+Myeloid <- c(
+  #"LOC145259775_myeloid_differentiation_primary_response_protein_MyD88-like", #MYD88
+  "LOC145276911_induced_myeloid_leukemia_cell_differentiation_protein_Mcl-1_homolog"#, #MCL1
+  #"LOC145297776_myeloid-derived_growth_factor-like", #MYDGF
+  #"LOC145297803_myeloid_leukemia_factor_1-like", #MLF1
+  #"LOC145303596_myeloid_leukemia_factor_2-like" #MLF2
+  #X#"LOC145303598_myeloid_leukemia_factor_2-like" #MLF2
+)
+
+Platelet <- c(
+  "LOC145277628_platelet-activating_factor_acetylhydrolase_IB_subunit_alpha2-like"#, #PAFAH1B2
+  #"LOC145279758_platelet-activating_factor_acetylhydrolase-like" #PAF-AH
+)
+
+Macrophage <- c(
+  #"LOC145254682_monocyte_to_macrophage_differentiation_factor_2-like", #MMD2
+  #"LOC145269864_macrophage_metalloelastase-like", #MMP
+  "LOC145277553_macrophage_migration_inhibitory_factor-like", #MIF
+  #"LOC145277554_macrophage_migration_inhibitory_factor-like", #MIF
+  "LOC145284844_natural_resistance-associated_macrophage_protein_2-like"#, #NRAMP2 or DMT1 or SLC11A2
+  #"LOC145291322_natural_resistance-associated_macrophage_protein_2-like" ##NRAMP2 or DMT1 or SLC11A2
+)
+
+Leukocyte <- c(
+  #"LOC145243966_leukocyte_tyrosine_kinase_receptor-like",
+  #"LOC145252475_leukocyte_elastase_inhibitor-like",
+  #"LOC145252476_leukocyte_elastase_inhibitor_A_pseudogene",
+  #"LOC145252583_leukocyte_receptor_cluster_member_9-like",
+  #"LOC145261077_cysteinyl_leukotriene_receptor_1-like",
+  #"LOC145269125_leukocyte_receptor_cluster_member_1_homolog",
+  #X#"LOC145274194_leukotoxin_export_ATP-binding_protein_LtxB-like",
+  "LOC145284903_leukocyte_receptor_cluster_member_8_homolog",
+  "LOC145288069_leukocyte_elastase_inhibitor-like"#,
+  #"LOC145297606_leukotriene_A-4_hydrolase-like"
+)
+
+Melanocyte <- c(
+  "LOC145248024_leucine-rich_melanocyte_differentiation-associated_protein-like",
+  "LOC145288655_leucine-rich_melanocyte_differentiation-associated_protein-like"
+)
+
+Erythrocyte <- c(
+  "LOC145252556_5-aminolevulinate_synthase,_erythroid-specific,_mitochondrial-like"
+)
+
+NKcells <- c(
+  "LOC145266719_killer_cell_lectin-like_receptor_subfamily_F_member_1"
+)
+
+Endothelial <- c(
+  #"LOC145241505_endothelial_differentiation-related_factor_1_homolog",
+  #"LOC145242090_endothelin-converting_enzyme_homolog",
+  #"LOC145254767_BMP-binding_endothelial_regulator_protein-like",
+  "LOC145258150_vascular_endothelial_growth_factor_receptor_1-like",
+  #"LOC145261200_endothelin-converting_enzyme_homolog",
+  "LOC145270282_endothelin-converting_enzyme_1-like"
+)
+
+Fibroblast <- c(
+  #"LOC145242616_fibroblast_growth_factor_receptor-like_1",
+  #"LOC145247897_fibroblast_growth_factor_receptor_3-like",
+  #"LOC145248700_fibroblast_growth_factor_receptor_2-like",
+  "LOC145263773_fibroblast_growth_factor_receptor_1-like"#,
+  #"LOC145266927_fibroblast_growth_factor_18-like",
+  #"LOC145277826_fibroblast_growth_factor_9-like",
+  #"LOC145283546_fibroblast_growth_factor_receptor_3-like",
+  #"LOC145292938_acidic_fibroblast_growth_factor_intracellular-binding_protein_B-like"
+)
+
+Cytokine <- c(
+  #"LOC145268228_cytokine-like_nuclear_factor_N-PAC",
+  #"LOC145285903_suppressor_of_cytokine_signaling_2-like",
+  #"LOC145291943_suppressor_of_cytokine_signaling_2-like",
+  "LOC145294080_cytokine_receptor-like_factor_3"
+)
+
+Hemato.Seqs <- c(
+  Hemato_Stem, CDs, Integrins, 
+    
+  Endothelial, Fibroblast, Cytokine,
+  
+  Lymphoid, B_cell, T_cell, NKcells,
+  
+  Myeloid, Platelet, Macrophage, Leukocyte, Melanocyte, Erythrocyte
+
+)
+
+#check what genes are not in transformed dataset
+missing_rows <- Hemato.Seqs[ !Hemato.Seqs %in% rownames(assay(vsd)) ]
+print(missing_rows)
+
+Hemato_annotation_row = data.frame(
+                Hemato.Gene.Class = factor(rep(c(
+                  "Hemato_Stem", "CDs", "Integrins", 
+                  "Endothelial", "Fibroblast", "Cytokine",
+                  "Lymphoid", "B_cell", "T_cell","NKcells",
+                  "Myeloid", "Platelet", "Macrophage", "Leukocyte", "Melanocyte", "Erythrocyte"
+                  ),
+                  c(
+                    #Partial list - Fig. 4A
+                    4, #hemato
+                    6, #CDs
+                    4, #integrins
+                    2, #endo
+                    1, #fibro
+                    1, #cyto
+                    1, #lymphoid
+                    1, #Bcell
+                    1, #TCell
+                    1, #NK
+                    1, #Myeloid
+                    1, #Platelet
+                    2, #macro
+                    2, #leuko
+                    2, #melano
+                    1 #erythrocyte
+                    
+                    #full list - Fig. S5A
+                    #6, #hemato
+                    #16, #CDs
+                    #7, #Integrins
+                    
+                    #6, #Endothelial
+                    #8, #Fibroblast
+                    #4, #cytokine
+                    
+                    #5, #Lymphoid
+                    #5, #B_cell
+                    #3, #T-cell
+                    #1, #NKcells
+                    
+                    #4, #Myeloid
+                    #2, #Platelet
+                    #6, #macrophage
+                    #9, #Leukocyte
+                    #2, #melanocyte
+                    #1 #Erythrocyte
+                    ))))
+rownames(Hemato_annotation_row) = Hemato.Seqs
+
+#Am deciding sequence order before hand
+#refactoring to get ID
+
+Hemato.Seqs.Groups <- factor(Hemato_annotation_row$Hemato.Gene.Class,
+                             levels = c("Hemato_Stem", "CDs", "Integrins",
+                                        "Endothelial", "Fibroblast", "Cytokine",
+                                        "Lymphoid", "B_cell", "T_cell", "NKcells",
+                                        "Myeloid", "Platelet", "Macrophage", "Leukocyte", "Melanocyte", "Erythrocyte" 
+                             ))
+
+#Adding color 
+Hemato_row_colors = list(
+  Hemato.Gene.Class = c(
+                               Hemato_Stem = "red1",
+                               CDs = "red4",
+                               Integrins = "red3",
+                               
+                               Endothelial = "indianred3",
+                               Fibroblast = "indianred4",
+                               Cytokine = "cyan2",
+
+                               
+                               Lymphoid = "khaki2",
+                               B_cell = "gold2",
+                               T_cell = "goldenrod1",
+                               NKcells = "yellow4",
+                               
+                               Myeloid = "dodgerblue",
+                               Platelet = "lightblue3",
+                               Macrophage = "royalblue",
+                               Leukocyte = "forestgreen",
+                               Melanocyte = "blue1",
+                               Erythrocyte = "blue4"
+))
+
+```
+
+
+
+WB GOIs for model
+```{r}
+sn.genes <- c(
+  
+  #TFs
+  "LOC145267028_HHEX*",
+  "LOC145291535_RUNX1*",
+  "LOC145296204_transcription_factor_GATA-3-like",
+  "LOC145249753_sushi,_von_Willebrand_factor_type_A,_EGF_and_pentraxin_domain-containing_protein_1-like",
+  "LOC145259310_ETS-related_transcription_factor_Elf-2-like",
+  
+  #HNRNPs
+  "LOC145255650_heterogeneous_nuclear_ribonucleoproteins_A2/B1-like",
+  "LOC145255648_heterogeneous_nuclear_ribonucleoproteins_A1_homolog",
+  "LOC145258173_heterogeneous_nuclear_ribonucleoprotein_A1-like_3",
+  "LOC145260563_heterogeneous_nuclear_ribonucleoprotein_U-like_protein_1",
+  "LOC145276714_heterogeneous_nuclear_ribonucleoprotein_K-like",
+  
+  #Actin-mediated cytoplasmic bridge
+  "LOC145259195_actin,_cytoplasmic_1-like",
+  "LOC145241409_actin-related_protein_5-like",
+  "LOC145243680_coactosin-like_protein",
+  "LOC145247564_actin-related_protein_2/3_complex_subunit_5-B-like",
+  "LOC145245752_kinesin-like_protein_KIF11-A",
+  
+  #Ras gtpase
+  "LOC145252733_rho_GDP-dissociation_inhibitor_2-like",
+  "LOC145260529_ras-like_GTP-binding_protein_RHO",
+  "LOC145270024_NF-kappa-B_inhibitor-interacting_Ras-like_protein_1",
+  "LOC145239760_GTPase_KRas-like",
+  "LOC145263723_ras-related_protein_M-Ras-like",
+  
+  #PRRs
+  "LOC145291335_EsPGRP5",
+  "LOC145266610_scavenger_receptor_cysteine-rich_domain_superfamily_protein-like",
+  "LOC145296256_T-cell_immunomodulatory_protein-like",
+  "LOC145254925_toll-like_receptor_4",
+  "LOC145279619_galectin-3-binding_protein_A-like",
+  
+  #Iron regulation
+  "LOC145283795_hephaestin-like_protein",
+  "LOC145246871_ferritin-1_heavy_chain-like",
+  "LOC145242702_soma_ferritin-like",
+  "LOC145254756_iron-sulfur_cluster_transfer_protein_NUBPL-like",
+  "LOC145241961_succinate_dehydrogenase_[ubiquinone]_iron-sulfur_subunit,_mitochondrial-like"
+)
+
+
+
+```
+
+
+
+########
+HeatMaps
+########
+Setup happens here for columns/rows annotations 
+As well as LFC/p.Adj values
+
+```{r}
+#row annotations for specific groups of GOIs are in the above GOIs section
+
+#column annotation
+annotation_col = data.frame((colData(dds)[("Organ.Type")]),
+                            (colData(dds)[("Sex")]),
+                            (colData(dds)[("Tissue.Type")]),
+                            (colData(dds)[("Hemato")])
+)
+```
+
+
+
+
+
+#################
+HeatMaps for DEGs
+#################
+- Code for: 
+    - Fig. 5 - Sex-Specific WB DEGs
+    - Figs. S# - Full sex-specific WB DEG list across tissues
+
+- Adding in LFC/p.Adj values (row annotations)
+```{r}
+#12/2/24 - rewrote adding lfc/padj annots to just pull out ordered l2fc/padj and make it a matrix/df after i made results shrink table
+
+######################
+#adding lfc somehow###
+######################
+resLFC.LFC.mtx
+#pulling out DEG subset
+VSD.LFC.DEGs.mtx <- subset(resLFC.LFC.mtx, 
+                                 rownames(resLFC.LFC.mtx) %in% DEGs)
+VSD.LFC.Named.DEGs.mtx <- subset(resLFC.LFC.mtx, 
+                                 rownames(resLFC.LFC.mtx) %in% Named.DE.GOIs)
+#pull out values greater than LFC = |.5|
+# Keep rows where EVERY element is > 0.5 OR < -0.5
+filtered_rows <- VSD.LFC.Named.DEGs.mtx[rowSums(abs(VSD.LFC.Named.DEGs.mtx) > 0.5) == ncol(VSD.LFC.Named.DEGs.mtx), , drop = FALSE]
+filt_VSD.LFC.Named.DEGs.mtx = filtered_rows
+
+
+######################################
+#adding padj info to heatmap somehow#
+######################################
+resLFC.Padj
+colnames(resLFC.Padj)[1] ="P.Adj"
+#pulling out named DEG subset
+VSD.padj.DEGs.df <- subset(resLFC.Padj,
+                                 rownames(resLFC.Padj) %in% DEGs)
+VSD.padj.Named.DEGs.df <- subset(resLFC.Padj,
+                                 rownames(resLFC.Padj) %in% Named.DE.GOIs)
+#extracting rows that match the subsetted VSD.LFC.Named.DEGs.mtx
+df = VSD.padj.Named.DEGs.df
+filt_degs <- rownames(filt_VSD.LFC.Named.DEGs.mtx)
+filt_df <- VSD.padj.Named.DEGs.df[rownames(VSD.padj.Named.DEGs.df) %in% filt_degs, , drop = FALSE]
+filt_VSD.padj.Named.DEGs.df = filt_df
+
+#first extract filt Named DEGs 
+# Filter to KEEP items present in the filter vector
+filt_Named_DEGs <- Named.DE.GOIs[Named.DE.GOIs %in% filt_degs]
+
+
+#Need reorder gene subset in the order of the LFC values
+#https://stackoverflow.com/questions/17031039/how-to-sort-a-character-vector-according-to-a-specific-order
+#Named.DE.GOIs <- Named.DE.GOIs[order(match(Named.DE.GOIs, rownames(VSD.LFC.DEGs.mtx)))]
+#Named.DE.GOIs <- Named.DE.GOIs[order(match(Named.DE.GOIs, rownames(VSD.LFC.Named.DEGs.mtx)))]
+```
+
+
+- now making heatmap with row annotations 
+```{r}
+#heating the map for All DEGs
+Candidates.Heatmap <- ComplexHeatmap::pheatmap(assay(vsd)[DEGs,],
+                                               #assay(vsd)[Named.DE.GOIs,],
+                                               #assay(vsd)[filt_Named_DEGs,1:10]
+                                               #assay(vsd)[DEGs,],
+                                               #vsd.DEGs
+                                               #WB.vsd.DEGs
+                                               #WB.vsd.DEGs[DE.GOIs,]
+                                               
+                                               cluster_rows=F, 
+                                               cluster_cols=F,
+                                               
+                                               show_rownames=T,
+                                               show_colnames = T,
+                                               
+                                               #Set up for Organ.Type
+                                               column_split = annotation_col$Organ.Type,
+                                               annotation_names_col = T,
+                                               column_title = NULL,
+                                               
+                                               top_annotation = HeatmapAnnotation(Organ.Type = anno_block(gp = gpar(fill = c("#E18004", "#0072B2", "navajowhite", "yellow4", "#009E73")),
+                                               labels = c("Epidermal (MNTL, SKIN, ARM)", 
+                                               "Gonadal (OVRY, TST)", 
+                                               "Hematopoietic (WB)", 
+                                               "Neural (CB, OL)", 
+                                               "Symbioitc (LO_CC)"),  
+                                               labels_gp = gpar(col = "white", fontsize = 11))#,
+                                               ),
+                                               
+                                               
+                                               fontsize_row = 10,
+                                               fontsize_col = 10,
+                                               
+                                               col = rev(brewer.pal(11, "RdBu")),
+                                               border = NA,
+                                               
+                                               scale = "row",
+                                               name = "Z-Score",
+                                               #name = "VST Counts",
+                                               #annotation_colors = ann_colors,
+                                               heatmap_legend_param = list(legend_direction = "horizontal"
+                                                                           #legend_width = unit(, "cm")
+                                               ),
+                                               #Horizontal Z scoring -> https://stackoverflow.com/questions/52794692/complexheatmap-cannot-create-horizontal-legend
+                                               angle_col = "45",
+                                               
+                                               
+                                               
+                                               #add L2FC and p.adj
+                                               #https://stackoverflow.com/questions/61050899/complexheatmap-increase-label-size-of-side-annotation
+                                               #https://jokergoo.github.io/ComplexHeatmap-reference/book/heatmap-annotations.html#box-annotation
+                                               #https://bioconductor.riken.jp/packages/3.8/bioc/vignettes/ComplexHeatmap/inst/doc/s4.heatmap_annotation.html
+                                               right_annotation = rowAnnotation(#P.Adj Annot
+                                                 df = VSD.padj.DEGs.df, 
+                                                 #VSD.padj.Named.DEGs.df, 
+                                                 #VSD.padj.DEGs.df
+                                                 #filt_VSD.padj.Named.DEGs.df
+                                                 col = list(P.Adj = colorRamp2(c(0, .01, .001), hcl_palette = "Viridis")
+                                                 ),
+                                                 #L2FC annot
+                                                 Log2FC = anno_barplot(VSD.LFC.DEGs.mtx, 
+                                                                       #VSD.LFC.DEGs.mtx
+                                                                       #VSD.LFC.Named.DEGs.mtx
+                                                                       #filt_VSD.LFC.Named.DEGs.mtx
+                                                                       bar_width = .75,
+                                                                       #width = unit(3, "cm"),
+                                                                       gp = gpar(fill = ifelse(VSD.LFC.DEGs.mtx > 0,
+                                                                                               #VSD.LFC.DEGs.mtx
+                                                                                               #VSD.LFC.Named.DEGs.mtx
+                                                                                               #filt_VSD.LFC.Named.DEGs.mtx
+                                                                                               "deepskyblue", "deeppink2"),
+                                                                                 fontsize = 10),
+                                                                       axis_param = list(
+                                                                         gp = gpar(fontsize = 8),
+                                                                         labels_rot = 45)
+                                                 ),
+                                                 
+                                                 #styling PAdj/L2FC legends
+                                                 annotation_name_rot = c(0, 0),
+                                                 annotation_width = unit(c(1.5, .7), "cm"),
+                                                 gp = gpar(col = "black"),
+                                                 show_annotation_name = c(P.Adj = FALSE),
+                                                 annotation_legend_param = list(title_gp=gpar(fontsize=10,
+                                                                                              fontface="bold"),
+                                                                                labels_gp = gpar(fontsize = 10),
+                                                                                direction = "horizontal")
+                                               )
+)
+ComplexHeatmap::draw(Candidates.Heatmap, 
+                     heatmap_legend_side="bottom", #left
+                     annotation_legend_side = "bottom", #bottom
+                     legend_grouping = "original",
+                     padding = unit(c(2, 20, 2, 70), "mm")) ## see right heatmap in following)
+
+```
+
+
+
+#################
+HeatMaps for GOIs
+#################
+```{r}
+Candidates.Heatmap <- ComplexHeatmap::pheatmap(assay(vsd)[sn.genes,1:10],
+                                               #Top WB expression figs (Fig. 3, Fig. S3)
+                                               #mtx_no_ribo_no_unchar
+                                               #vsd.select,
+                                               
+                                               
+                                               #hemato/immune figs (Figs. 4,S5)
+                                               #assay(vsd)[Immuno.Seqs,]
+                                               #assay(vsd)[Immuno.Seqs,1:10]
+                                               #assay(vsd)[Hemato.Seqs,]
+                                               #assay(vsd)[Hemato.Seqs,1:10]
+                                               
+                                               #sn genes for model (Fig. 7)
+                                               #assay(vsd)[sn.genes,]
+                                               
+                                               #old random genes of interest
+                                               #vsd.OL.select
+                                               #assay(vsd)[HCR_WB_GOIs,]
+                                               
+                                               
+
+                                               cluster_rows=F, 
+                                               #cluster_row_slices = T,
+                                               cluster_cols=F,
+                                               
+                                               show_rownames=T,
+                                               show_colnames = T,
+                                               
+                                               #Set up for Organ.Type
+                                               #top_annotation = HeatmapAnnotation(Organ.Type = anno_block(gp = gpar(fill = c("#E18004", 
+                                                                                                                             #"#0072B2", 
+                                                                                                                             #"navajowhite", 
+                                                                                                                             #"yellow4", 
+                                                                                                                             #"#009E73")),
+                                               #labels = c("Epidermal (MNTL, SKIN, ARM)", 
+                                                #          "Gonadal (OVRY, TST)", 
+                                                #          "Hematopoietic (WB)", 
+                                                #          "Neural (CB, OL)", 
+                                                #          "Symbioitc (LO_CC)"),  
+                                               #labels_gp = gpar(col = "white", fontsize = 12))),
+                                               
+                                               
+                                               #column annotation
+                                               #column_split = annotation_col$Organ.Type,
+                                               #annotation_names_col = F,
+                                               #column_title = NULL,
+                                               
+                                               #row annotation
+                                               #annotation_row = Hemato_annotation_row, 
+                                               #Immuno_annotation_row #Hemato_annotation_row
+                                               
+                                               #row_split = Hemato.Seqs.Groups, 
+                                               #Immuno.Seqs.Groups #Hemato.Seqs.Groups
+                                               
+                                               #annotation_names_row = F, #removes annotation label thank god #https://support.bioconductor.org/p/131791/
+                                               #row_title_rot = 0,
+                                               #row_title = NULL,
+                                               #annotation_colors = Hemato_row_colors, #Immuno_row_colors, #Hemato_row_colors
+
+                                               fontsize_row = 12,
+                                               fontsize_col = 8,
+                                               col = rev(brewer.pal(11, "PuOr")),#rev(),
+                                               border = F,
+                                               
+                                               #Z scaling or transformed counts
+                                               #scale = "row", #z score (observes per sample/#std deviations away from mean gene expression)
+                                               #name = "Z-Score",
+                                               name = "VST Counts",
+                                               
+                                               heatmap_legend_param = list(legend_direction = "horizontal"#,
+                                                                           #legend_width = unit(, "cm")
+                                               ),
+                                               
+                                               #Horizontal Z scoring -> https://stackoverflow.com/questions/52794692/complexheatmap-cannot-create-horizontal-legend
+                                               angle_col = "45"
+                                               )
+                                          
+
+ComplexHeatmap::draw(Candidates.Heatmap, 
+     heatmap_legend_side="bottom", 
+     annotation_legend_side = "bottom", 
+     legend_grouping = "original",
+     padding = unit(c(2, 2, 2, 120), "mm")) ## see right heatmap in following)
+#save image size so it fits:
+#like 1700 width/1800 height
+#padding is good but need to make it more narrow
+#and maybe for vst have names on left and swap dendrogram?
+
+```
+
+
+
+
+
+
+#############################################################
+KEGG/GO Analysis with ClusterProfiler from EggNOG annotations
+#############################################################
+
+DESeq2 was used to compare: 
+- M/F white bodies
+- Pair-wise comparisons of upregulated WB genes across all tissues by comparing the hematopoietic white bodies to each organ type (epidermal, gonadal,neural, and symbiotic) independently then pooling the significant white body DEGs from these data. 
+  - See the PCA section above for how the DDS object was generated for this
+
+I have been unable to extract GO/KO terms EggNOG-annotated Preferred Names for gene IDs - 11/19/2024, I think I got it! Must extract GO/KOs when setting preferred gene names in beginning like so:
+
+Reading in EnTAP
+```{r}
+EggNOG.KEGG.GO <- fread("clusterprofiler/entap_results.tsv",
+                     select = c("Query_Sequence", 
+                                "Database_EggNOG_KEGG_KO", 
+                                "Database_EggNOG_GO_Biological",
+                                "Database_EggNOG_GO_Cellular",
+                                "Database_EggNOG_GO_Molecular"
+                                ))
+#have NaN's here from entap but probably shouldn't drop any
+#some KOs are NaN whereas some GOs aren't and vice versa
+```
+
+
+Merging edited LOC IDs with entap
+```{r}
+#read in merged name df from top of this file
+merged_df <- read.csv('NCBI_LOC_Descript_counts_matrix.csv')
+
+#change col name to match entap col with LOC IDs
+colnames(merged_df)[colnames(merged_df) == 'symbol'] <- 'Query_Sequence'
+
+#merge
+merge_LOC_entap <- merge(EggNOG.KEGG.GO, merged_df, by = "Query_Sequence", all.x=TRUE, all.y=TRUE)
+
+#omit NAs
+merge_LOC_entap <- na.omit(merge_LOC_entap)
+
+#ensuring df structure
+merge_LOC_entap <- as.data.frame(merge_LOC_entap)
+
+#keeping KOs, GOs, new names
+#https://stackoverflow.com/questions/4605206/drop-data-frame-columns-by-name
+keeps <- c("Description",
+           "Database_EggNOG_KEGG_KO",
+           "Database_EggNOG_GO_Biological",
+           "Database_EggNOG_GO_Cellular",
+           "Database_EggNOG_GO_Molecular"
+)
+merge_LOC_entap <- merge_LOC_entap[ , keeps, drop = FALSE]
+```
+
+
+Dropping 'ribosomal' genes
+```{r}
+merge_LOC_entap <- merge_LOC_entap[!grepl("ribosom", merge_LOC_entap$Description),]
+#drops about 4K genes
+```
+
+
+Making new columns with all GOS
+- GOs are split by category (BP, CC, MF) which is ideal but they'll get split again not to worry!
+- https://stackoverflow.com/questions/18115550/combine-two-or-more-columns-in-a-dataframe-into-a-new-column-with-a-new-name
+```{r}
+df = merge_LOC_entap
+df$GOs <- paste(df$Database_EggNOG_GO_Biological,
+                df$Database_EggNOG_GO_Cellular,
+                df$Database_EggNOG_GO_Molecular,
+                sep=","
+                )
+df$GOs <- gsub(",,", ",", df$GO) #changing double commas to single
+```
+
+
+
+Splitting by GO/KOs
+```{r}
+
+KO_df <- data.frame(df$Description,
+                       df$Database_EggNOG_KEGG_KO)
+
+GO_df <- data.frame(df$Description,
+                       df$GOs)
+
+#cleaning NaN finally
+KO_df <- KO_df[!grepl("NaN", KO_df$df.Database_EggNOG_KEGG_KO),]
+
+#have to be more through w the GOs NaN though
+GO_df$df.GOs <- gsub("NaN,", "", GO_df$df.GOs) #removing NaN
+GO_df$df.GOs <- gsub(",NaN", "", GO_df$df.GOs) #removing NaN
+GO_df <- GO_df[!grepl("NaN", GO_df$df.GOs),]
+
+#fixing col names
+colnames(KO_df) <- c("ID", "KOs")
+colnames(GO_df) <- c("ID", "GOID")
+```
+
+
+
+Saving final edited GO/KO lists
+```{r}
+write.table(GO_df, file = "LOC_gene_GOs.txt", 
+            sep="\t",
+            col.names = F, 
+            row.names = F,
+            quote = FALSE,
+)
+write.table(KO_df, file = "LOC_gene_KOs.txt", 
+            sep="\t",
+            col.names = F, 
+            row.names = F,
+            quote = FALSE
+)
+```
+
+
+
+Reading in lists for mapping
+```{r}
+
+#ReadMapping of GO/KEGG
+GO_db <- readMappings("clusterprofiler/LOC_gene_GOs.txt",
+                      sep = "\t",
+                      IDsep = ","
+                      )
+
+KEGG_db <- readMappings("clusterprofiler/LOC_gene_KOs.txt",
+                        sep="\t", 
+                        IDsep = ",")
+
+```
+
+
+
+Making GO and KO lists (Gene to GO, GO to term)
+- Remove commas from values in a column and place separated values into new rows
+  - https://stackoverflow.com/questions/17583926/r-remove-commas-from-values-in-a-column-and-place-separated-values-into-new-ro?rq=3
+```{r}
+GOs <- data.frame(cbind(
+  unlist(lapply(strsplit(GO_df$GOID,","), cbind))
+)) %>% unique() 
+names(GOs)[1] <- "GOID"
+KOs <- data.frame(cbind(
+  unlist(lapply(strsplit(KO_df$KOs,","), cbind))
+)) %>% unique() 
+names(KOs)[1] <- "KOID"
+```
+
+
+
+Mapping genes to GO/KO terms
+```{r}
+#GOs
+GOpath<-data.frame()
+for(i in names(GO_db)){
+  y =GO_db[[i]]
+  ln<-length(GO_db[[i]])
+  x=data.frame(ID=rep(i,ln),y)
+  GOpath<-rbind(GOpath,x)
+}
+colnames(GOpath)<-c("ID","GOID")
+
+head(GOpath)
+GOpath[60:80,]
+GO.Gene2Term <- GOpath
+
+
+#KOs
+KEGGpath<-data.frame()
+for(i in names(KEGG_db)){
+  y =KEGG_db[[i]]
+  ln<-length(KEGG_db[[i]])
+  x=data.frame(ID=rep(i,ln),y)
+  KEGGpath<-rbind(KEGGpath,x)
+}
+KEGGpath$y<-sub("ko:","",KEGGpath$y)
+colnames(KEGGpath)<-c("ID","KEGG")
+
+head(KEGGpath)
+KEGGpath[60:80,]
+
+#saving these so don't have to rerun all this every time!
+write.csv(GO.Gene2Term, "clusterprofiler/GO.Gene2Term.csv",
+          col.names = T,
+          row.names = F,
+          sep = "\t")
+write.csv(KEGGpath, "clusterprofiler/KEGGpath.csv",
+          col.names = T,
+          row.names = F,
+          sep = "\t")
+```
+
+
+
+For GOs, add annotations to each GO to create Term2Name
+```{r}
+library(GO.db)
+goterms <- Term(GOTERM)
+goontology <- Ontology(GOTERM)
+GO.Term2Name <- data.frame("GOID" = names(goterms),
+                           "TERM" = goterms, 
+                           "Ontology" = goontology )
+
+#subsetting for BP, MF, CC GO terms
+GO.Term2Name.CC = subset(GO.Term2Name, Ontology == "CC")
+GO.Term2Name.MF = subset(GO.Term2Name, Ontology == "MF")
+GO.Term2Name.BP = subset(GO.Term2Name, Ontology == "BP")
+
+#and delete rows with word ribosom (ribosome AND ribosomal)
+#https://stackoverflow.com/questions/22249702/delete-rows-containing-specific-strings-in-r
+GO.Term2Name.CC = GO.Term2Name.CC[!grepl("ribosom", GO.Term2Name.CC$TERM),]
+GO.Term2Name.MF = GO.Term2Name.MF[!grepl("ribosom", GO.Term2Name.MF$TERM),]
+GO.Term2Name.BP = GO.Term2Name.BP[!grepl("ribosom", GO.Term2Name.BP$TERM),]
+```
+
+
+
+Also must make Gene2Term which connects genes to GO terms/descriptions
+```{r}
+#merge LOC gene IDs, GO term, and descriptions
+#https://stackoverflow.com/questions/70878527/r-how-to-subset-a-dataframe-based-on-another-dataframe
+GO.Gene2Term.CC = merge(GOpath, GO.Term2Name.CC, by = c("GOID"))
+GO.Gene2Term.MF = semi_join(GOpath, GO.Term2Name.MF, by = c("GOID"))
+GO.Gene2Term.BP = semi_join(GOpath, GO.Term2Name.BP, by = c("GOID"))
+
+#swap columns
+df = GO.Gene2Term.CC
+df = df[, c("GOID", "ID")]
+GO.Gene2Term.CC = df
+
+df = GO.Gene2Term.MF
+df = df[, c("GOID", "ID")]
+GO.Gene2Term.MF = df
+
+df = GO.Gene2Term.BP
+df = df[, c("GOID", "ID")]
+GO.Gene2Term.BP = df
+```
+
+
+
+
+With all the setup, can now make figures!
+
+
+################################
+ORA with GO terms via enricher()
+################################
+```{r}
+#examining top white body genes 
+
+#read in truly unique hematopoietic sequences 
+Truly.Hemato.Unique <- file.choose() 
+#choose Unique_hemato_degs.txt - might need to pull from venny still
+#pulled from venny, choose this file instead: Postvenny_hemato_degs copy.txt
+test <- fread(Truly.Hemato.Unique,
+              header = F) 
+Truly.Hemato.Unique <- test$V1
+
+
+#establish universe of unique potential genes
+universe <- GO.Gene2Term$GENE %>%
+  unique()
+gene <- Truly.Hemato.Unique 
+
+BP.enrich <- enricher(gene = gene,
+                   universe = universe,
+                   pvalueCutoff = .05,
+                   pAdjustMethod = "BH",
+                   minGSSize = 10,
+                   maxGSSize = 500, #(length of gene)
+                   qvalueCutoff = .02,
+                   TERM2GENE = GO.Gene2Term.BP,
+                   TERM2NAME = GO.Term2Name.BP
+)
+CC.enrich <- enricher(gene = gene,
+                   universe = universe,
+                   pvalueCutoff = .05,
+                   pAdjustMethod = "BH",
+                   minGSSize = 10,
+                   maxGSSize = 500, #(length of gene)
+                   qvalueCutoff = .02,
+                   TERM2GENE = GO.Gene2Term.CC,
+                   TERM2NAME = GO.Term2Name.CC
+)
+MF.enrich <- enricher(gene = gene,
+                   universe = universe,
+                   pvalueCutoff = .05,
+                   pAdjustMethod = "BH",
+                   minGSSize = 10,
+                   maxGSSize = 500, #(length of gene)
+                   qvalueCutoff = .02,
+                   TERM2GENE = GO.Gene2Term.MF,
+                   TERM2NAME = GO.Term2Name.MF
+)
+
+BP.dotplot <- dotplot(BP.enrich, showCategory = 20)
+CC.dotplot <- dotplot(CC.enrich, showCategory = 20)
+MF.dotplot <- dotplot(MF.enrich, showCategory = 20)
+aplot::plot_list(BP.dotplot,
+                   CC.dotplot,
+                   MF.dotplot
+                   #labels=LETTERS[1:3]
+                 )
+plot_grid(BP.dotplot,
+          CC.dotplot,
+          MF.dotplot,
+          ncol = 1, align = "v")
+
+
+cnetplot(BP.enrich, 
+         #categorySize="pvalue", 
+         #foldChange=$log2FoldChange
+         node_label="category"
+         )
+         
+cnetplot(CC.enrich, 
+         #categorySize="pvalue"#, 
+         #foldChange=$log2FoldChange
+         )
+cnetplot(MF.enrich, 
+         #categorySize="pvalue"#, 
+         #foldChange=$log2FoldChange
+         )
+
+#heatplot
+heatplot(BP.enrich, showCategory = 10)
+heatplot(CC.enrich, showCategory = 10)
+heatplot(MF.enrich, showCategory = 10)
+
+
+# calculate pairwise similarities of the enriched terms using Jaccard’s similarity index
+BP.enrich.Jaccard <- pairwise_termsim(BP.enrich)
+BP.treeplot <- treeplot(BP.enrich.Jaccard, showCategory = 20)
+CC.enrich.Jaccard <- pairwise_termsim(CC.enrich) 
+CC.treeplot <- treeplot(CC.enrich.Jaccard, showCategory = 20)
+MF.enrich.Jaccard <- pairwise_termsim(MF.enrich)
+MF.treeplot <- treeplot(MF.enrich.Jaccard, showCategory = 20)
+
+aplot::plot_list(BP.treeplot, 
+                 CC.treeplot,
+                 MF.treeplot
+                 #tag_levels='A'
+                 )
+p3 <- plot_grid(BP.treeplot, 
+                 CC.treeplot,
+                 MF.treeplot,
+          ncol = 1, align = "v")
+
+# Enrichment map 
+BP.emapplot <- emapplot(BP.enrich.Jaccard, layout = "kk", 
+                        showCategory = 20, 
+                        node_label = 'group',
+                        nCluster = 5
+)
+CC.emapplot <- emapplot(CC.enrich.Jaccard, layout = "kk", 
+                        showCategory = 20, 
+                        node_label = 'group',
+                        nCluster = 5
+)
+MF.emapplot <- emapplot(MF.enrich.Jaccard, layout = "kk", 
+                        showCategory = 20, 
+                        node_label = 'group',
+                        nCluster = 5
+)
+aplot::plot_list(BP.emapplot,
+                   CC.emapplot,
+                   MF.emapplot
+                   #labels=LETTERS[1:3]
+                 )
+plot_grid(BP.emapplot,
+                   CC.emapplot,
+                   MF.emapplot,
+          ncol = 1, align = "v")
+
+#cnetplot again
+BP.cnetplot <- cnetplot(BP.enrich.Jaccard, 
+         #categorySize="pvalue", 
+         #circular = TRUE, 
+         #colorEdge = TRUE
+         )
+         
+CC.cnetplot <- cnetplot(CC.enrich.Jaccard, 
+         categorySize="pvalue",
+         circular = TRUE, colorEdge = TRUE
+)
+MF.cnetplot <- cnetplot(MF.enrich.Jaccard, 
+         categorySize="pvalue",
+         circular = TRUE, colorEdge = TRUE
+         )
+
+
+
+
+
+outpathcount = "clusterprofiler/"
+write.csv(BP.enrich, file=paste(outpathcount,
+                                "Top.WB.DEGs.BP.enrich.csv",
+                                sep = ""), 
+          row.names = T, col.names = T, quote=FALSE) 
+write.csv(CC.enrich, file=paste(outpathcount,
+                                "Top.WB.DEGs.CC.enrich.csv",
+                                sep = ""), 
+          row.names = T, col.names = T, quote=FALSE) 
+write.csv(MF.enrich, file=paste(outpathcount,
+                                "Top.WB.DEGs.MF.enrich.csv",
+                                sep = ""), 
+          row.names = T, col.names = T, quote=FALSE) 
+write.csv(BP.enrich.Jaccard, file=paste(outpathcount,
+                                "Top.WB.DEGs.BP.enrich.Jaccard.csv",
+                                sep = ""), 
+          row.names = T, col.names = T, quote=FALSE) 
+write.csv(CC.enrich.Jaccard, file=paste(outpathcount,
+                                "Top.WB.DEGs.CC.enrich.Jaccard.csv",
+                                sep = ""), 
+          row.names = T, col.names = T, quote=FALSE) 
+write.csv(MF.enrich.Jaccard, file=paste(outpathcount,
+                                "Top.WB.DEGs.MF.enrich.Jaccard.csv",
+                                sep = ""), 
+          row.names = T, col.names = T, quote=FALSE) 
+
+
+
+
+```
+
+
+
+
+##############################
+ORA with KO terms via enKEGG()
+##############################
+
+Thsi tutorial super helpful: https://orlanc.github.io/cp_enrichment/R_enrichment/kegg_pathway_enrichment.html
+
+```{r}
+
+id <- Truly.Hemato.Unique
+
+id_ko<-KEGGpath[which(KEGGpath$ID%in%id),]
+head(id_ko, n = 10)
+
+#Delete those IDs that have non-Knumber associated
+ko<-id_ko[id_ko$KEGG!="-",]
+head(ko)
+
+#remove duplicate rows if any
+#https://www.datanovia.com/en/lessons/identify-and-remove-duplicate-data-in-r/
+ko <- ko %>% distinct(ID, KEGG, .keep_all = TRUE)
+
+
+#Perform the KEGG pathway enrichment analysis
+#Use Knumber from data frame ko. 
+#In this step, you might get an error; if it happens, go back to Install and load packages.
+
+knum<-ko$KEGG
+enKEGG <-enrichKEGG(knum, 
+                     organism = 'ko', 
+                     minGSSize = 10,
+                     maxGSSize = 500,
+                     keyType = "kegg", 
+                     pvalueCutoff = .05,
+                     pAdjustMethod = "BH", 
+                     qvalueCutoff = .02
+)
+
+write.csv(enKEGG, file=paste(outpathcount,
+                                 "Top.WB.enKEGG.csv",
+                                 sep = ""), 
+            row.names=TRUE, col.names=T, quote=FALSE) 
+
+#getting errors when trying to run emapplot, likely because of duplicate terms (ie cell cycle in jaccard df)
+#try to filter out w clusterprofiler's function
+# Filter out duplicates so each Description only appears once
+enKEGG <- clusterProfiler::filter(enKEGG, !duplicated(Description))
+
+enKEGG.dotplot <- dotplot(enKEGG, showCategory = 20)
+
+enKEGG.Jaccard <- pairwise_termsim(enKEGG)
+write.csv(enKEGG.Jaccard, file=paste(outpathcount,
+                                "Top.WB.DEGs.enKEGG.Jaccard.csv",
+                                sep = ""), 
+          row.names = T, col.names = T, quote=FALSE) 
+enKEGG.treeplot <- treeplot(enKEGG.Jaccard, showCategory=20)
+
+
+enKEGG.emapplot <- emapplot(enKEGG.Jaccard,
+                            showCategory = 20,
+                            #min_edge = 0,
+                            layout = "kk",
+                            node_label = 'group',
+                            nCluster = 5
+                            #group = TRUE
+                            #cex.params = list(category_label = 0)
+                            )
+```
+
+
+#############################
+Saving combined GO/KEGG plots
+#############################
+```{r}
+p1 <- plot_grid(BP.dotplot,CC.dotplot,MF.dotplot,enKEGG.dotplot,
+          ncol=1,
+          align="v")
+# Save it as an SVG
+ggsave(filename = "GO_KEGG_dotplot.svg", 
+       plot = p1, 
+       device = "svg",      # Forces SVG engine
+       width = 6,          # Broad width prevents label clipping
+       height = 33,         # Broad height helps spread out the network
+       units = "in",        # Dimensions in inches
+       bg = "white")        # Keeps the background solid white
+
+
+
+p2 <- aplot::plot_list(BP.emapplot,CC.emapplot,MF.emapplot,enKEGG.emapplot,
+          ncol=1
+          #align="v"
+          )
+# Add 1-inch margins around the entire plot to fit the ellipses
+p3 <- enKEGG.emapplot + theme(plot.margin = margin(.5, .5, .5, .5, "in"))
+# Allow shapes to draw completely outside the axes bounding box
+p4 <- p3 + coord_cartesian(clip = "off")
+# Save it as an SVG
+
+#might have to save plots individually
+ggsave(filename = "GO_KEGG_emapplot.svg", 
+       plot = p4, 
+       device = "svg",      # Forces SVG engine
+       width =10,          # Broad width prevents label clipping
+       height =6,         # Broad height helps spread out the network
+       units = "in",        # Dimensions in inches
+       bg = "white",         # Keeps the background solid white
+       scale = 0.9
+)
+
+
+
+
+
+p3 <- plot_grid(BP.treeplot,CC.treeplot,MF.treeplot,enKEGG.treeplot,
+          ncol=1,
+          align="v")
+# Save it as an SVG
+ggsave(filename = "GO_KEGG_treeplot.svg", 
+       plot = p3, 
+       device = "svg",      # Forces SVG engine
+       width = 18,          # Broad width prevents label clipping
+       height = 33,         # Broad height helps spread out the network
+       units = "in",        # Dimensions in inches
+       bg = "white")        # Keeps the background solid white
+
+
+
+
+
+pAll <- plot_grid(
+          BP.dotplot,
+          BP.treeplot,
+          BP.emapplot,
+          
+          CC.dotplot,
+          CC.treeplot,
+          CC.emapplot,
+          
+          MF.dotplot,
+          MF.treeplot,
+          MF.emapplot,
+          
+          enKEGG.dotplot,
+          enKEGG.treeplot,
+          enKEGG.emapplot,
+          
+          ncol = 3, 
+          nrow = 4,
+          align = "v")
+
+ggsave(filename = "GO_KEGG_allplots.svg", 
+       plot = pAll, 
+       device = "svg",      # Forces SVG engine
+       width = 30,          # Broad width prevents label clipping
+       height = 40,         # Broad height helps spread out the network
+       units = "in",        # Dimensions in inches
+       bg = "white")        # Keeps the background solid white
+
+
+
+```
+
+
+
+
+####################################################
+Gene Set Enrichment Analysis (GSEA) for M/F WB genes
+####################################################
+For this, we need:
+  - a list of genes were interested in 
+  - a ranking of those genes (in this case we will take L2FC)
+  
+Previously, got error when running this, but since the analysis was re-leveled on F.WBs up top when making the results, shouldn't be an issue
+```{r}
+
+#getting just shrunken LFC values
+resLFC <- res.df[c("log2FoldChange")]
+
+#gene list setup
+PreGeneList <- tibble::rownames_to_column(resLFC.LFC, "GENE") %>% as.data.frame()
+geneList = PreGeneList[,2]
+names(geneList) = as.character(PreGeneList[,1])
+geneList = sort(geneList, decreasing = TRUE)
+
+#swap columns maybe? -> fixed this up top
+#df = GO.Gene2Term
+#df = df[, c("GOID", "ID")]
+#GO.Gene2Term = df
+
+gsea <-GSEA(
+  geneList,
+  exponent = 1,
+  minGSSize = 10,
+  maxGSSize = 500,
+  eps = 0,
+  pvalueCutoff = 1,
+  pAdjustMethod = "none",
+  gson = NULL,
+  TERM2GENE = GO.Gene2Term,
+  TERM2NAME = GO.Term2Name.MF,
+  verbose = TRUE,
+  seed = FALSE,
+  by = "fgsea"
+)
+#don't need to do a BH or low p adj cause these genes are already sig. 
+#Just want to see how FC affects representative terms
+
+write.csv(gsea, file="GSEA_res_CC.csv", 
+          #sep="\t",
+          #col.names = F, 
+          #row.names = F,
+          quote = FALSE) 
+
+#Dotplot
+dotplot(gsea, showCategory=20, split=".sign") + facet_grid(.~.sign)
+
+#Encrichment Map:Enrichment map organizes enriched terms into a 
+#network with edges connecting overlapping gene sets. In this way, 
+#mutually overlapping gene sets are tend to cluster together, 
+#making it easy to identify functional modules.
+#https://github.com/YuLab-SMU/enrichplot/issues/79
+gsea_emap <- enrichplot::pairwise_termsim(gsea)#, semData = d)
+emapplot(gsea_emap)
+
+
+# categorySize can be either 'pvalue' or 'geneNum'
+#this is th best one cayse we can change the parameter to LFC which is what is interesting
+#we don't need to do a BH p adj. cause these genes are already sig. Just want to see how FC affects representative terms
+
+library(igraph)
+p1 <- cnetplot(gsea, 
+               showCategory = 25,
+               foldChange = geneList,
+               layout = igraph::layout_nicely)
+
+# Add your custom color scale (e.g., standard Blue-White-Red gradient)
+p2 <- p1 + scale_color_gradient2(name = "Log 2 Fold Change", 
+                          low = "deeppink2", 
+                          mid = "gray", 
+                          high = "deepskyblue", 
+                          midpoint = 0)
+p2
+
+# Save it as an SVG
+ggsave(filename = "cnetplot_gsea.svg", 
+       plot = p2, 
+       device = "svg",      # Forces SVG engine
+       width = 15,          # Broad width prevents label clipping
+       height = 13,         # Broad height helps spread out the network
+       units = "in",        # Dimensions in inches
+       bg = "white")        # Keeps the background solid white
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
