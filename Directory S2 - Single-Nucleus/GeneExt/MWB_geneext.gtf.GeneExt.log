@@ -1,0 +1,44 @@
+python geneext.py -genome /home/FCAM/jbriseno/JB_Nyholm_Lab/Sept2026_Ch2_BulkDataV3_ReAnalyses/ParseV2_GenomeV3/genomes/geneext//agat_genomic.gtf -bam /home/FCAM/jbriseno/JB_Nyholm_Lab/Sept2026_Ch2_BulkDataV3_ReAnalyses/ParseV2_GenomeV3/analysis/process/sorted_cleaned_barcode_headAligned_anno.bam -output /home/FCAM/jbriseno/JB_Nyholm_Lab/Sept2026_Ch2_BulkDataV3_ReAnalyses/ParseV2_GenomeV3/genomes/geneext//MWB_geneext.gtf -tag GeneExt -verbose 1 -jobs 1 -output_mode new_transcript -clip_strand sense -peak_perc 0 -force True
+╭──────────────────╮
+│ Preflight checks │
+╰──────────────────╯
+Temporary directory isn't set, setting to tmp/
+Temporary directory created: tmp/
+Alignment file ... OK
+Genome annotation file .... OK
+Input: /home/FCAM/jbriseno/JB_Nyholm_Lab/Sept2026_Ch2_BulkDataV3_ReAnalyses/ParseV2_GenomeV3/genomes/geneext//agat_genomic.gtf, guessed format: gff
+Output: /home/FCAM/jbriseno/JB_Nyholm_Lab/Sept2026_Ch2_BulkDataV3_ReAnalyses/ParseV2_GenomeV3/genomes/geneext//MWB_geneext.gtf, guessed format: gtf
+Checking gene exons...
+314 contings in genome
+925 contings in bam
+Done reordering genefile.
+╭───────────╮
+│ Execution │
+╰───────────╯
+Maximum allowed extension length is not set, getting median size of the gene - 118 bp.
+Running macs2 ...
+done
+Filtering macs2 peaks ...
+Computing coverage ...
+mean chunk size: 957562.0
+Done computing coverage: tmp/allpeaks_coverage.bed
+0.13 ms per region
+Getting genic peaks ...
+0-th mean coverage percentile for tmp/genic_peaks.bed is 0 reads/base. Filtering out the peaks below this value...
+Removing peaks overlapping genes ... => tmp/allpeaks_noov.bed
+
+Retained 553033/553033 (100.0 %) intergenic peaks.
+done
+Extending genes ...
+	1119 peaks assigned to 1119 genes.
+	Average n peaks per gene: 1.0
+	Maximal allowed extension: 118
+	Mean: 45.2
+	Median: 40.0
+	Max: 118
+done
+╭───────────╮
+│ All done! │
+╰───────────╯
+Extended 1118/53617 genes
+Median extension length: 40.0 bp

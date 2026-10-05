@@ -1,0 +1,50 @@
+{
+    "workdir": "/home/FCAM/jbriseno/JB_Nyholm_Lab/Sept2026_Ch2_BulkDataV3_ReAnalyses/kb_dir",
+    "version": "0.30.2",
+    "kallisto": {
+        "path": "/home/FCAM/jbriseno/miniconda3/envs/kb_env/lib/python3.14/site-packages/kb_python/bins/linux/kallisto/kallisto",
+        "version": "0.52.0"
+    },
+    "bustools": {
+        "path": "/home/FCAM/jbriseno/miniconda3/envs/kb_env/lib/python3.14/site-packages/kb_python/bins/linux/bustools/bustools",
+        "version": "0.45.1"
+    },
+    "start_time": "2026-09-23T10:01:52.824588",
+    "end_time": "2026-09-23T10:18:12.782557",
+    "elapsed": 979.957969,
+    "call": "/home/FCAM/jbriseno/miniconda3/envs/kb_env/bin/kb count -x SPLIT-SEQ -w onlist.txt -r replace.txt -i index.idx -g t2g.txt -c1 cdna_t2c.txt -c2 intron_t2c.txt --h5ad --workflow nucleus --num -t 10 -m 300G --report -o MWB_kb --overwrite /labs/Nyholm/scsnRNASeq/Parse/MA7.WB_FB4.ANG_ParseMiniV2_2024/kb_cleaned_reads//Cleaned_MA7_WB_R1.fastq.gz /labs/Nyholm/scsnRNASeq/Parse/MA7.WB_FB4.ANG_ParseMiniV2_2024/kb_cleaned_reads//Cleaned_MA7_WB_R2.fastq.gz",
+    "commands": [
+        "kallisto bus -i index.idx -o MWB_kb -x SPLIT-SEQ -t 10 /labs/Nyholm/scsnRNASeq/Parse/MA7.WB_FB4.ANG_ParseMiniV2_2024/kb_cleaned_reads//Cleaned_MA7_WB_R1.fastq.gz /labs/Nyholm/scsnRNASeq/Parse/MA7.WB_FB4.ANG_ParseMiniV2_2024/kb_cleaned_reads//Cleaned_MA7_WB_R2.fastq.gz",
+        "bustools sort -o MWB_kb/tmp/output.s.bus -T MWB_kb/tmp -t 10 -m 300G MWB_kb/output.bus",
+        "bustools inspect -o MWB_kb/inspect.json -w onlist.txt MWB_kb/tmp/output.s.bus",
+        "bustools correct -o MWB_kb/tmp/output.s.c.bus -w onlist.txt MWB_kb/tmp/output.s.bus",
+        "bustools sort -o MWB_kb/output.unfiltered.bus -T MWB_kb/tmp -t 10 -m 300G MWB_kb/tmp/output.s.c.bus",
+        "bustools capture -o MWB_kb/tmp/spliced.bus -c intron_t2c.txt -e MWB_kb/matrix.ec -t MWB_kb/transcripts.txt --complement --transcripts MWB_kb/output.unfiltered.bus",
+        "bustools inspect MWB_kb/tmp/spliced.bus",
+        "bustools sort -o MWB_kb/spliced.unfiltered.bus -T MWB_kb/tmp -t 10 -m 300G MWB_kb/tmp/spliced.bus",
+        "bustools inspect -o MWB_kb/inspect.spliced.json -w onlist.txt MWB_kb/spliced.unfiltered.bus",
+        "bustools count -o MWB_kb/counts_unfiltered/spliced -g t2g.txt -e MWB_kb/matrix.ec -t MWB_kb/transcripts.txt --genecounts --umi-gene MWB_kb/spliced.unfiltered.bus",
+        "bustools capture -o MWB_kb/tmp/unspliced.bus -c cdna_t2c.txt -e MWB_kb/matrix.ec -t MWB_kb/transcripts.txt --complement --transcripts MWB_kb/output.unfiltered.bus",
+        "bustools inspect MWB_kb/tmp/unspliced.bus",
+        "bustools sort -o MWB_kb/unspliced.unfiltered.bus -T MWB_kb/tmp -t 10 -m 300G MWB_kb/tmp/unspliced.bus",
+        "bustools inspect -o MWB_kb/inspect.unspliced.json -w onlist.txt MWB_kb/unspliced.unfiltered.bus",
+        "bustools count -o MWB_kb/counts_unfiltered/unspliced -g t2g.txt -e MWB_kb/matrix.ec -t MWB_kb/transcripts.txt --genecounts --umi-gene MWB_kb/unspliced.unfiltered.bus"
+    ],
+    "runtimes": [
+        438.5960714817047,
+        119.76468706130981,
+        2.0379714965820312,
+        2.0596208572387695,
+        114.64453458786011,
+        18.545438051223755,
+        1.224630355834961,
+        109.24490547180176,
+        1.211402416229248,
+        17.112756967544556,
+        15.767232179641724,
+        1.4375572204589844,
+        115.17855453491211,
+        1.4095020294189453,
+        17.912670612335205
+    ]
+}

@@ -1,0 +1,14 @@
+{
+	"n_targets": 703069,
+	"n_bootstraps": 0,
+	"n_processed": 39983109,
+	"n_pseudoaligned": 32158161,
+	"n_unique": 417209,
+	"p_pseudoaligned": 80.4,
+	"p_unique": 1.0,
+	"kallisto_version": "0.52.0",
+	"index_version": 13,
+	"k-mer length": 31,
+	"start_time": "Wed Sep 23 10:01:55 2026",
+	"call": "/home/FCAM/jbriseno/miniconda3/envs/kb_env/lib/python3.14/site-packages/kb_python/bins/linux/kallisto/kallisto bus -i index.idx -o MWB_kb -x SPLIT-SEQ -t 10 /labs/Nyholm/scsnRNASeq/Parse/MA7.WB_FB4.ANG_ParseMiniV2_2024/kb_cleaned_reads//Cleaned_MA7_WB_R1.fastq.gz /labs/Nyholm/scsnRNASeq/Parse/MA7.WB_FB4.ANG_ParseMiniV2_2024/kb_cleaned_reads//Cleaned_MA7_WB_R2.fastq.gz"
+}
