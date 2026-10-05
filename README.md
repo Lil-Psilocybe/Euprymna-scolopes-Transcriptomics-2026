@@ -16,12 +16,12 @@ Included here are supplemental directories:
   - Bash script - Bulk_RNASeq_Briseño_et_al_2026.sh
 
 - Directory S2 - Single-Nucleus
-  Table S2 - Nuclei Isolation Buffer Recipes.xlsx
-  kb folder
-  Parse folder
-  GeneExt folder
-  scanpy folder
-  scVelo folder
-  GOATools folder
-  Jupyter notebook - Male_WB_scverse.ipynb
-  Bash script - Single_Nuclei_RNASeq_Briseño_et_al_2026.sh
+  - Table S2 - Nuclei Isolation Buffer Recipes.xlsx
+  - kb folder
+  - Parse folder
+  - GeneExt folder
+  - scanpy folder
+  - scVelo folder
+  - GOATools folder
+  - Jupyter notebook - Male_WB_scverse.ipynb
+  - Bash script - Single_Nuclei_RNASeq_Briseño_et_al_2026.sh
